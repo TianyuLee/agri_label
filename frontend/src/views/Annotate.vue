@@ -91,168 +91,18 @@
       <div class="column column-3">
         <div class="column-header">
           <span>标注详情</span>
-          <div v-if="selectedTaskId" class="version-toggle">
-            <button
-              class="version-btn"
-              :class="{ active: displayVersion === 'V1' }"
-              @click="displayVersion = 'V1'"
-            >
-              V1
-            </button>
-            <button
-              class="version-btn"
-              :class="{ active: displayVersion === 'V2' }"
-              @click="displayVersion = 'V2'"
-            >
-              V2
-            </button>
-          </div>
         </div>
         <div class="column-content">
           <div v-if="currentTask" class="annotation-panel">
             <div class="query-title">{{ currentTask.query }}</div>
 
             <div class="rubrics-list">
-              <!-- V1 版本：结构化显示 -->
-              <template v-if="displayVersion === 'V1'">
-                <div
-                  v-for="rubric in currentTask.rubrics"
-                  :key="rubric.id"
-                  class="rubric-item-v1"
-                  :class="{ selected: rubric.selected, editing: rubric.editingField, 'negative-score': parseRubricV1(rubric.content).score < 0 }"
-                >
-                  <!-- 编辑模式：显示输入框和保存/取消按钮 -->
-                  <template v-if="rubric.editingField">
-                    <!-- 标题编辑行 -->
-                    <div class="rubric-v1-row">
-                      <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
-                        <span v-if="rubric.selected">✓</span>
-                      </div>
-                      <div class="rubric-v1-title-wrapper">
-                        <textarea
-                          v-if="rubric.editingField === 'title'"
-                          v-model="rubric.editTitle"
-                          class="rubric-v1-title-input"
-                          placeholder="请输入标题"
-                          rows="2"
-                          @keyup.enter.ctrl="saveRubricV1Field(rubric)"
-                        ></textarea>
-                        <div v-else class="rubric-v1-title readonly">{{ parseRubricV1(rubric.content).title || '点击添加标题' }}</div>
-                      </div>
-                      <div class="edit-actions">
-                        <button class="btn-save" @click="saveRubricV1Field(rubric)">保存</button>
-                        <button class="btn-cancel" @click="cancelEditRubricV1(rubric)">取消</button>
-                      </div>
-                    </div>
-
-                    <!-- Checklist编辑行 -->
-                    <div class="rubric-v1-row checklist-row" v-if="rubric.editingField === 'checklist'">
-                      <div class="rubric-v1-checklist-wrapper">
-                        <textarea
-                          v-model="rubric.editChecklist"
-                          class="rubric-v1-checklist-input"
-                          placeholder="请输入checklist"
-                          rows="3"
-                        ></textarea>
-                      </div>
-                    </div>
-                    <div class="rubric-v1-row checklist-row" v-else>
-                      <div class="rubric-v1-checklist-wrapper">
-                        <div class="rubric-v1-checklist readonly">{{ parseRubricV1(rubric.content).checklist || '点击添加checklist' }}</div>
-                      </div>
-                    </div>
-
-                    <!-- 维度和分数编辑行 -->
-                    <div class="rubric-v1-row meta-row">
-                      <div class="rubric-v1-dimension-wrapper" v-if="rubric.editingField === 'dimension'">
-                        <input
-                          v-model="rubric.editDimension"
-                          class="rubric-v1-dimension-input"
-                          placeholder="请输入维度"
-                          @keyup.enter="saveRubricV1Field(rubric)"
-                        />
-                      </div>
-                      <div class="rubric-v1-dimension-wrapper" v-else @click="startEditRubricV1Field(rubric, 'dimension')">
-                        <div class="rubric-v1-dimension">
-                          <span class="meta-label">维度:</span>
-                          <span class="meta-value">{{ parseRubricV1(rubric.content).dimension || '点击添加' }}</span>
-                        </div>
-                      </div>
-
-                      <div class="rubric-v1-score-wrapper" v-if="rubric.editingField === 'score'">
-                        <input
-                          v-model.number="rubric.editScore"
-                          type="number"
-                          class="rubric-v1-score-input"
-                          placeholder="分数"
-                          @keyup.enter="saveRubricV1Field(rubric)"
-                        />
-                      </div>
-                      <div class="rubric-v1-score-wrapper" v-else @click="startEditRubricV1Field(rubric, 'score')">
-                        <div class="rubric-v1-score">
-                          <span class="meta-label">分数:</span>
-                          <span class="meta-value">{{ parseRubricV1(rubric.content).score !== null ? parseRubricV1(rubric.content).score : '点击添加' }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-
-                  <!-- 非编辑模式：显示文本，点击可编辑 -->
-                  <template v-else>
-                    <!-- 第一行：标题 + 操作按钮 -->
-                    <div class="rubric-v1-row">
-                      <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
-                        <span v-if="rubric.selected">✓</span>
-                      </div>
-                      <div class="rubric-v1-title-wrapper" @click="startEditRubricV1Field(rubric, 'title')">
-                        <div class="rubric-v1-title">
-                          {{ parseRubricV1(rubric.content).title || '点击添加标题' }}
-                        </div>
-                      </div>
-                      <div class="rubric-v1-actions">
-                        <div class="rubric-actions">
-                          <button class="action-btn edit small" @click.stop="startEditRubricV1Field(rubric, 'title')" title="编辑">✎</button>
-                          <button class="action-btn delete small" @click.stop="deleteRubric(rubric.id)" title="删除">×</button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 第二行：checklist -->
-                    <div class="rubric-v1-row checklist-row">
-                      <div class="rubric-v1-checklist-wrapper" @click="startEditRubricV1Field(rubric, 'checklist')">
-                        <div class="rubric-v1-checklist">
-                          {{ parseRubricV1(rubric.content).checklist || '点击添加checklist' }}
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 第三行：维度 + 分数 -->
-                    <div class="rubric-v1-row meta-row">
-                      <div class="rubric-v1-dimension-wrapper" @click="startEditRubricV1Field(rubric, 'dimension')">
-                        <div class="rubric-v1-dimension">
-                          <span class="meta-label">维度:</span>
-                          <span class="meta-value">{{ parseRubricV1(rubric.content).dimension || '点击添加' }}</span>
-                        </div>
-                      </div>
-                      <div class="rubric-v1-score-wrapper" @click="startEditRubricV1Field(rubric, 'score')">
-                        <div class="rubric-v1-score">
-                          <span class="meta-label">分数:</span>
-                          <span class="meta-value">{{ parseRubricV1(rubric.content).score !== null ? parseRubricV1(rubric.content).score : '点击添加' }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-              </template>
-
-              <!-- V2 版本：结构化显示（标题、维度、分数） -->
-              <template v-else>
-                <div
-                  v-for="rubric in currentTask.rubrics"
-                  :key="rubric.id"
-                  class="rubric-item-v2"
-                  :class="{ selected: rubric.selected, editing: rubric.editingFieldV2, 'negative-score': parseRubricV2(rubric.content).score < 0 }"
-                >
+              <div
+                v-for="rubric in currentTask.rubrics"
+                :key="rubric.id"
+                class="rubric-item-v2"
+                :class="{ selected: rubric.selected, editing: rubric.editingFieldV2, 'negative-score': parseRubricV2(rubric.content).score < 0 }"
+              >
                   <!-- 编辑模式 -->
                   <template v-if="rubric.editingFieldV2">
                     <!-- 第一行：标题编辑 -->
@@ -347,9 +197,8 @@
                       </div>
                     </div>
                   </div>
-                </template>
+                  </template>
               </div>
-            </template>
 
               <div v-if="selectedTaskId" class="add-rubric-item" @click="showAddRubricModal">
                 <span class="add-icon">+</span>
@@ -474,30 +323,35 @@
             <label class="file-input-label">
               <input
                 type="file"
-                accept=".csv"
+                accept=".json"
                 @change="handleFileSelect"
                 ref="fileInput"
                 style="display: none"
               />
-              <span class="file-input-btn">选择 CSV 文件</span>
+              <span class="file-input-btn">选择 JSON 文件</span>
               <span class="file-name">{{ importFile?.name || '未选择文件' }}</span>
             </label>
             <div class="import-hint">
-              <p>Excel/CSV 格式要求：</p>
-              <ul>
-                <li>第1列：手机号（标注员账号）</li>
-                <li>第2列：任务集合名称</li>
-                <li>第3列：任务名称</li>
-                <li>第4列：Rubric 内容</li>
-                <li>第5列：维度（可选）</li>
-                <li>第6列：分数（可选，默认为0）</li>
-              </ul>
-              <p class="hint-note">注：请使用UTF-8编码的CSV文件。Excel用户请另存为CSV格式：文件 -> 另存为 -> CSV (逗号分隔)(*.csv)</p>
+              <p>JSON 格式要求（rubric_output.json 格式）：</p>
+              <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 12px;">
+[
+  {
+    "user_name": "18222611632",
+    "collection_name": "20260407",
+    "prompt": "柑橘得了黄龙病怎么治疗",
+    "rubrics": [
+      { "criterion": "明确说明柑橘黄龙病目前无特效治愈药", "axis": "", "point": 5 },
+      { "criterion": "建议尽快进行田间诊断与实验室检测", "axis": "", "point": 3 }
+    ],
+    "answers": ["标准答案内容..."]
+  }
+]</pre>
+              <p class="hint-note">注：请使用UTF-8编码的JSON文件。每个任务通过 user_name + collection_name + prompt 定位，rubrics 为对象数组（含 criterion/axis/point），answers 为字符串数组。</p>
             </div>
           </div>
 
-          <div v-if="importPreview.length > 0" class="import-preview">
-            <h4>预览 ({{ importPreview.length }} 条记录)</h4>
+          <div v-if="importRubrics.length > 0 || importAnswers.length > 0" class="import-preview">
+            <h4>预览 ({{ importRubrics.length }} 个 rubric, {{ importAnswers.length }} 个标准答案)</h4>
             <div class="preview-table-container">
               <table class="preview-table">
                 <thead>
@@ -539,7 +393,7 @@
           <button
             class="btn-confirm"
             @click="confirmImport"
-            :disabled="importPreview.length === 0 || importLoading"
+            :disabled="(importRubrics.length === 0 && importAnswers.length === 0) || importLoading"
           >
             {{ importLoading ? '导入中...' : '确认导入' }}
           </button>
@@ -584,18 +438,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
-// CSV 解析函数
-const parseExcelFile = (file) => {
+// JSON 解析函数（支持 rubric_output.json 格式）
+const parseImportFile = (file) => {
   return new Promise((resolve, reject) => {
     const fileName = file.name.toLowerCase()
-    const isCsv = fileName.endsWith('.csv')
+    const isJson = fileName.endsWith('.json')
 
-    if (!isCsv) {
-      reject(new Error('请上传 .csv 格式的文件。Excel用户请另存为CSV格式：文件 -> 另存为 -> CSV (逗号分隔)(*.csv)'))
+    if (!isJson) {
+      reject(new Error('请上传 .json 格式的文件'))
       return
     }
 
@@ -609,52 +463,84 @@ const parseExcelFile = (file) => {
       }
 
       try {
-        const lines = data.split('\n').filter(line => line.trim())
-        const result = []
-        for (const line of lines) {
-          // 支持 CSV 格式（逗号分隔）和 Tab 分隔
-          const cells = line.includes('\t')
-            ? line.split('\t')
-            : parseCSVLine(line)
-          if (cells.length >= 4) {
-            result.push({
-              phone: cells[0].trim(),
-              taskSetName: cells[1].trim(),
-              taskName: cells[2].trim(),
-              rubric: cells[3].trim(),
-              dimension: cells[4]?.trim() || '',
-              score: cells[5]?.trim() || '0'
+        const jsonData = JSON.parse(data)
+        // 支持数组格式
+        const tasks = Array.isArray(jsonData) ? jsonData : [jsonData]
+
+        // 解析 rubrics（去重：根据 user_name + collection_name + prompt + criterion）
+        const rubricMap = new Map()
+        // 解析 answers（去重：根据 user_name + collection_name + prompt + answer）
+        const answerMap = new Map()
+
+        tasks.forEach(task => {
+          const userName = task.user_name?.trim() || ''
+          const collectionName = task.collection_name?.trim() || ''
+          const prompt = task.prompt?.trim() || ''
+
+          // 解析 rubrics
+          if (task.rubrics && Array.isArray(task.rubrics)) {
+            task.rubrics.forEach(rubric => {
+              const criterion = rubric.criterion?.trim() || ''
+              if (!criterion) return
+
+              const key = `${userName}|${collectionName}|${prompt}|${criterion}`
+              if (!rubricMap.has(key)) {
+                rubricMap.set(key, {
+                  user_name: userName,
+                  collection_name: collectionName,
+                  prompt: prompt,
+                  criterion: criterion,
+                  axis: rubric.axis?.trim() || '',
+                  point: String(rubric.point ?? '0')
+                })
+              }
             })
           }
-        }
-        resolve(result)
+
+          // 解析 answers
+          if (task.answers && Array.isArray(task.answers)) {
+            task.answers.forEach(answer => {
+              const answerContent = answer?.trim()
+              if (!answerContent) return
+
+              const key = `${userName}|${collectionName}|${prompt}|${answerContent}`
+              if (!answerMap.has(key)) {
+                answerMap.set(key, {
+                  user_name: userName,
+                  collection_name: collectionName,
+                  prompt: prompt,
+                  answer: answerContent
+                })
+              }
+            })
+          }
+        })
+
+        const uniqueRubrics = Array.from(rubricMap.values())
+        const uniqueAnswers = Array.from(answerMap.values())
+
+        // 生成预览记录（用于表格展示）
+        const previewRecords = uniqueRubrics.map(r => ({
+          phone: r.user_name,
+          taskSetName: r.collection_name,
+          taskName: r.prompt,
+          rubric: r.criterion,
+          dimension: r.axis,
+          score: r.point
+        }))
+
+        resolve({
+          rubrics: uniqueRubrics,
+          answers: uniqueAnswers,
+          previewRecords: previewRecords
+        })
       } catch (err) {
-        reject(new Error('文件解析失败，请确保文件是UTF-8编码的CSV格式'))
+        reject(new Error('文件解析失败，请确保文件是有效的JSON格式'))
       }
     }
     reader.onerror = reject
     reader.readAsText(file, 'UTF-8')
   })
-}
-
-// 解析 CSV 行（处理引号内的逗号）
-const parseCSVLine = (line) => {
-  const result = []
-  let current = ''
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
-    if (char === '"') {
-      inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) {
-      result.push(current.trim())
-      current = ''
-    } else {
-      current += char
-    }
-  }
-  result.push(current.trim())
-  return result
 }
 
 const router = useRouter()
@@ -681,8 +567,10 @@ const unassignedTasks = ref([])
 const showImportModal = ref(false)
 const importFile = ref(null)
 const importPreview = ref([])
+const importRubrics = ref([])
+const importAnswers = ref([])
 const importLoading = ref(false)
-const importProgress = ref({ current: 0, total: 0 })
+const importProgress = ref({ current: 0, total: 0, type: '' })
 
 // Modal 相关
 const showModal = ref(false)
@@ -697,15 +585,6 @@ const fullscreenModalContent = ref('')
 const fullscreenModalPlaceholder = ref('')
 const fullscreenModalAction = ref(null)
 
-// 版本切换
-const displayVersion = ref('V2') // 'V1' 或 'V2'
-
-// 监听版本变化，自动刷新当前任务
-watch(displayVersion, async (newVersion) => {
-  if (selectedTaskId.value) {
-    await selectTask(selectedTaskId.value)
-  }
-})
 
 // 设置axios默认配置
 axios.defaults.headers.common['Authorization'] = `Bearer ${localStorage.getItem('token')}`
@@ -804,7 +683,9 @@ const showBatchImportModal = async () => {
   showImportModal.value = true
   importFile.value = null
   importPreview.value = []
-  importProgress.value = { current: 0, total: 0 }
+  importRubrics.value = []
+  importAnswers.value = []
+  importProgress.value = { current: 0, total: 0, type: '' }
   // 加载所有用户列表（用于手机号查找）
   if (allUsers.value.length === 0) {
     await loadAllUsers()
@@ -812,10 +693,11 @@ const showBatchImportModal = async () => {
 }
 
 const closeImportModal = () => {
-  if (importLoading.value) return
   showImportModal.value = false
   importFile.value = null
   importPreview.value = []
+  importRubrics.value = []
+  importAnswers.value = []
 }
 
 const handleFileSelect = async (event) => {
@@ -825,10 +707,12 @@ const handleFileSelect = async (event) => {
   importFile.value = file
 
   try {
-    const data = await parseExcelFile(file)
-    importPreview.value = data
+    const { rubrics, answers, previewRecords } = await parseImportFile(file)
+    importRubrics.value = rubrics
+    importAnswers.value = answers
+    importPreview.value = previewRecords
 
-    if (data.length === 0) {
+    if (rubrics.length === 0 && answers.length === 0) {
       alert('未解析到有效数据，请检查文件格式')
     }
   } catch (err) {
@@ -838,35 +722,74 @@ const handleFileSelect = async (event) => {
     event.target.value = ''
     importFile.value = null
     importPreview.value = []
+    importRubrics.value = []
+    importAnswers.value = []
   }
 }
 
 const confirmImport = async () => {
-  if (importPreview.value.length === 0) return
+  if (importRubrics.value.length === 0 && importAnswers.value.length === 0) return
 
   importLoading.value = true
-  importProgress.value = { current: 0, total: importPreview.value.length }
+
+  // 按 user_name + collection_name + prompt 分组
+  const taskGroups = new Map()
+
+  // 分组 rubrics
+  importRubrics.value.forEach(rubric => {
+    const key = `${rubric.user_name}|${rubric.collection_name}|${rubric.prompt}`
+    if (!taskGroups.has(key)) {
+      taskGroups.set(key, {
+        user_name: rubric.user_name,
+        collection_name: rubric.collection_name,
+        prompt: rubric.prompt,
+        rubrics: [],
+        answers: []
+      })
+    }
+    taskGroups.get(key).rubrics.push(rubric)
+  })
+
+  // 分组 answers
+  importAnswers.value.forEach(answer => {
+    const key = `${answer.user_name}|${answer.collection_name}|${answer.prompt}`
+    if (!taskGroups.has(key)) {
+      taskGroups.set(key, {
+        user_name: answer.user_name,
+        collection_name: answer.collection_name,
+        prompt: answer.prompt,
+        rubrics: [],
+        answers: []
+      })
+    }
+    taskGroups.get(key).answers.push(answer)
+  })
+
+  const uniqueTasks = Array.from(taskGroups.values())
+  importProgress.value = { current: 0, total: uniqueTasks.length, type: 'task' }
 
   const errors = []
   // 缓存：任务集合名称 -> { id, 任务名称 -> 任务ID }
   const taskSetCache = {}
-  // 缓存：任务ID -> 已存在的rubric内容集合（用于去重）
+  // 缓存：任务ID -> 已存在的rubric标题集合（用于去重）
   const taskRubricsCache = {}
+  // 缓存：任务ID -> 已存在的标准答案内容集合（用于去重）
+  const taskAnswersCache = {}
 
-  for (let i = 0; i < importPreview.value.length; i++) {
-    const item = importPreview.value[i]
+  for (let i = 0; i < uniqueTasks.length; i++) {
+    const taskGroup = uniqueTasks[i]
     importProgress.value.current = i + 1
 
     try {
       // 1. 获取或创建任务集合
       let taskSetId
-      if (taskSetCache[item.taskSetName]) {
-        taskSetId = taskSetCache[item.taskSetName].id
+      if (taskSetCache[taskGroup.collection_name]) {
+        taskSetId = taskSetCache[taskGroup.collection_name].id
       } else {
-        let taskSet = taskSets.value.find(ts => ts.name === item.taskSetName)
+        let taskSet = taskSets.value.find(ts => ts.name === taskGroup.collection_name)
         if (!taskSet) {
           const res = await axios.post('/api/admin/task-sets', {
-            name: item.taskSetName,
+            name: taskGroup.collection_name,
             description: '批量导入创建'
           })
           taskSetId = res.data.id
@@ -876,20 +799,20 @@ const confirmImport = async () => {
           taskSetId = taskSet.id
         }
         // 初始化缓存
-        taskSetCache[item.taskSetName] = { id: taskSetId, tasks: {} }
+        taskSetCache[taskGroup.collection_name] = { id: taskSetId, tasks: {} }
       }
 
-      // 2. 获取或创建任务（相同任务集合+任务名称合并）
+      // 2. 获取或创建任务
       let taskId
-      const taskCacheKey = item.taskName
-      if (taskSetCache[item.taskSetName].tasks[taskCacheKey]) {
-        taskId = taskSetCache[item.taskSetName].tasks[taskCacheKey]
+      const taskCacheKey = taskGroup.prompt
+      if (taskSetCache[taskGroup.collection_name].tasks[taskCacheKey]) {
+        taskId = taskSetCache[taskGroup.collection_name].tasks[taskCacheKey]
       } else {
         // 先检查该任务集合下是否已有同名任务
         let existingTask = null
         try {
           const tasksRes = await axios.get(`/api/task-sets/${taskSetId}/tasks`)
-          existingTask = tasksRes.data.find(t => t.query === item.taskName)
+          existingTask = tasksRes.data.find(t => t.query === taskGroup.prompt)
         } catch (err) {
           console.log('获取任务列表失败，将创建新任务')
         }
@@ -899,64 +822,123 @@ const confirmImport = async () => {
         } else {
           const taskRes = await axios.post('/api/admin/tasks', {
             task_set_id: taskSetId,
-            query: item.taskName
+            query: taskGroup.prompt
           })
           taskId = taskRes.data.id
         }
-        taskSetCache[item.taskSetName].tasks[taskCacheKey] = taskId
+        taskSetCache[taskGroup.collection_name].tasks[taskCacheKey] = taskId
       }
 
-      // 3. 检查该rubric是否已存在（避免重复添加相同rubric）
-      let rubricExists = false
-      if (taskRubricsCache[taskId]) {
-        rubricExists = taskRubricsCache[taskId].has(item.rubric)
-      } else {
-        try {
-          const taskDetailRes = await axios.get(`/api/tasks/${taskId}`)
-          const existingRubrics = taskDetailRes.data.rubrics || []
-          taskRubricsCache[taskId] = new Set(existingRubrics.map(r => r.content))
-          rubricExists = taskRubricsCache[taskId].has(item.rubric)
-        } catch (err) {
-          taskRubricsCache[taskId] = new Set()
+      // 3. 导入 Rubrics（如果标题不存在则创建）
+      if (taskGroup.rubrics.length > 0) {
+        // 获取已有rubric标题
+        if (!taskRubricsCache[taskId]) {
+          try {
+            const taskDetailRes = await axios.get(`/api/tasks/${taskId}`)
+            const existingRubrics = taskDetailRes.data.rubrics || []
+            const existingTitles = new Set()
+            existingRubrics.forEach(r => {
+              try {
+                const parsed = JSON.parse(r.content)
+                if (parsed.title) {
+                  existingTitles.add(parsed.title)
+                }
+              } catch (e) {
+                existingTitles.add(r.content)
+              }
+            })
+            taskRubricsCache[taskId] = existingTitles
+          } catch (err) {
+            taskRubricsCache[taskId] = new Set()
+          }
+        }
+
+        // 创建新的rubrics
+        for (const rubric of taskGroup.rubrics) {
+          const criterion = rubric.criterion?.trim()
+          if (!criterion) continue
+
+          // 检查标题是否已存在
+          if (taskRubricsCache[taskId].has(criterion)) {
+            continue
+          }
+
+          const rubricContent = JSON.stringify({
+            title: criterion,
+            score: parseInt(rubric.point) || 0,
+            dimension: rubric.axis?.trim() || ''
+          })
+
+          await axios.post('/api/admin/rubrics', {
+            task_id: taskId,
+            content: rubricContent,
+            version: 2
+          })
+          taskRubricsCache[taskId].add(criterion)
         }
       }
 
-      // 4. 创建 Rubric（如果不存在）
-      if (!rubricExists) {
-        // 构建V1格式的rubric内容（包含维度、分数）
-        const rubricContent = JSON.stringify({
-          title: item.rubric,
-          checklist: '',
-          score: parseInt(item.score) || 0,
-          dimension: item.dimension || ''
-        })
-        await axios.post('/api/admin/rubrics', {
-          task_id: taskId,
-          content: rubricContent,
-          version: 1
-        })
-        taskRubricsCache[taskId].add(item.rubric)
+      // 4. 导入标准答案（如果内容不存在则创建）
+      if (taskGroup.answers.length > 0) {
+        // 获取已有标准答案
+        if (!taskAnswersCache[taskId]) {
+          try {
+            const taskDetailRes = await axios.get(`/api/tasks/${taskId}`)
+            const existingAnswers = taskDetailRes.data.reference_answers || []
+            taskAnswersCache[taskId] = new Set(existingAnswers.map(a => a.content))
+          } catch (err) {
+            taskAnswersCache[taskId] = new Set()
+          }
+        }
+
+        // 创建新的标准答案
+        for (const answer of taskGroup.answers) {
+          const content = answer.answer?.trim()
+          if (!content) continue
+
+          // 检查是否已存在
+          if (taskAnswersCache[taskId].has(content)) {
+            continue
+          }
+
+          await axios.post('/api/admin/reference-answers', {
+            task_id: taskId,
+            content: content,
+            version: 2
+          })
+          taskAnswersCache[taskId].add(content)
+        }
       }
 
       // 5. 分配给指定用户（根据手机号查找用户ID）
-      const user = allUsers.value.find(u => u.phone === item.phone)
+      const user = allUsers.value.find(u => u.phone === taskGroup.user_name)
       if (user) {
         await axios.post(`/api/admin/assign-task?user_id=${user.id}&task_id=${taskId}`)
       } else {
-        errors.push(`第 ${i + 1} 行: 未找到手机号 ${item.phone} 对应的用户`)
+        errors.push(`任务 ${taskGroup.prompt}: 未找到手机号 ${taskGroup.user_name} 对应的用户`)
       }
     } catch (err) {
-      errors.push(`第 ${i + 1} 行: ${err.response?.data?.detail || err.message}`)
+      errors.push(`任务 ${taskGroup.prompt}: ${err.response?.data?.detail || err.message}`)
     }
   }
 
   importLoading.value = false
 
   if (errors.length > 0) {
-    alert(`导入完成，但有 ${errors.length} 条记录失败：\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n...' : ''}`)
+    alert(`导入完成，但有 ${errors.length} 个任务失败：\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n...' : ''}`)
   } else {
-    alert(`成功导入 ${importPreview.value.length} 条记录！`)
-    closeImportModal()
+    const taskCount = uniqueTasks.length
+    const rubricCount = importRubrics.value.length
+    const answerCount = importAnswers.value.length
+    console.log('导入成功，准备关闭弹窗，showImportModal:', showImportModal.value)
+    showImportModal.value = false
+    importFile.value = null
+    importPreview.value = []
+    importRubrics.value = []
+    importAnswers.value = []
+    await nextTick()
+    console.log('弹窗已关闭，showImportModal:', showImportModal.value)
+    alert(`成功导入 ${taskCount} 个任务，${rubricCount} 个 rubric，${answerCount} 个标准答案！`)
     // 刷新任务列表
     if (selectedSetId.value) {
       await selectTaskSet(selectedSetId.value)
@@ -1144,18 +1126,15 @@ const deleteTask = async (taskId) => {
 
 // ==================== Rubric 管理 ====================
 const showAddRubricModal = async () => {
-  // 先创建空的rubric
-  const version = displayVersion.value === 'V1' ? 1 : 2
-  const emptyContent = version === 1
-    ? buildRubricV1Content({ title: '', checklist: '', score: null, dimension: '' })
-    : buildRubricV2Content({ title: '', dimension: '', score: null })
+  // 先创建空的rubric（使用V2格式）
+  const emptyContent = buildRubricV2Content({ title: '', dimension: '', score: null })
 
   try {
     const url = isRoot.value ? '/api/admin/rubrics' : '/api/rubrics'
     const res = await axios.post(url, {
       task_id: selectedTaskId.value,
       content: emptyContent,
-      version: version
+      version: 2
     })
 
     if (res.data && res.data.id) {
@@ -1173,32 +1152,12 @@ const showAddRubricModal = async () => {
         currentTask.value.rubrics.push(newRubric)
 
         // 自动进入编辑模式（标题字段）
-        if (version === 1) {
-          startEditRubricV1Field(newRubric, 'title')
-        } else {
-          startEditRubricV2Field(newRubric, 'title')
-        }
+        startEditRubricV2Field(newRubric, 'title')
       }
     }
   } catch (err) {
     alert('添加失败: ' + (err.response?.data?.detail || err.message))
   }
-}
-
-const editRubric = (rubric) => {
-  openModal('编辑Rubric', [
-    { label: '内容', type: 'textarea', value: rubric.content, placeholder: '请输入rubric内容' }
-  ], async (fields) => {
-    try {
-      const url = isRoot.value ? `/api/admin/rubrics/${rubric.id}/content` : `/api/rubrics/${rubric.id}/content`
-      await axios.patch(url, {
-        content: fields[0].value
-      })
-      await selectTask(selectedTaskId.value)
-    } catch (err) {
-      alert('编辑失败: ' + (err.response?.data?.detail || err.message))
-    }
-  })
 }
 
 const deleteRubric = async (rubricId) => {
@@ -1209,55 +1168,6 @@ const deleteRubric = async (rubricId) => {
   } catch (err) {
     alert('删除失败: ' + (err.response?.data?.detail || err.message))
   }
-}
-
-// ==================== V1 Rubric 行内编辑 ====================
-const startEditRubricV1Field = (rubric, field) => {
-  // 先取消其他所有rubric的编辑状态
-  if (currentTask.value) {
-    currentTask.value.rubrics.forEach(r => {
-      r.editingField = null
-    })
-  }
-
-  const parsed = parseRubricV1(rubric.content)
-  rubric.editingField = field
-  rubric.editTitle = parsed.title
-  rubric.editChecklist = parsed.checklist
-  rubric.editDimension = parsed.dimension
-  rubric.editScore = parsed.score
-}
-
-const cancelEditRubricV1 = (rubric) => {
-  rubric.editingField = null
-}
-
-const saveRubricV1Field = async (rubric) => {
-  const parsed = parseRubricV1(rubric.content)
-
-  // 根据当前编辑的字段更新数据
-  if (rubric.editingField === 'title') {
-    parsed.title = rubric.editTitle || ''
-  } else if (rubric.editingField === 'checklist') {
-    parsed.checklist = rubric.editChecklist || ''
-  } else if (rubric.editingField === 'dimension') {
-    parsed.dimension = rubric.editDimension || ''
-  } else if (rubric.editingField === 'score') {
-    parsed.score = rubric.editScore !== '' ? parseInt(rubric.editScore) : null
-  }
-
-  const newContent = buildRubricV1Content(parsed)
-  if (newContent !== rubric.content) {
-    try {
-      const url = isRoot.value ? `/api/admin/rubrics/${rubric.id}/content` : `/api/rubrics/${rubric.id}/content`
-      await axios.patch(url, { content: newContent })
-      rubric.content = newContent
-    } catch (err) {
-      console.error('保存失败:', err)
-      alert('保存失败: ' + (err.response?.data?.detail || err.message))
-    }
-  }
-  rubric.editingField = null
 }
 
 // ==================== V2 Rubric 行内编辑 ====================
@@ -1306,12 +1216,12 @@ const saveRubricV2Field = async (rubric) => {
   rubric.editingFieldV2 = null
 }
 
-// ==================== V2 Rubric 格式解析与编辑（与V1独立） ====================
+// ==================== V2 Rubric 格式解析 ====================
 const parseRubricV2 = (content) => {
   try {
     const parsed = JSON.parse(content)
-    // V2格式检查：必须包含title, dimension, score字段，不包含checklist
-    if (parsed.title !== undefined && parsed.dimension !== undefined && parsed.score !== undefined && parsed.checklist === undefined) {
+    // V2格式检查：必须包含title, dimension, score字段
+    if (parsed.title !== undefined && parsed.dimension !== undefined && parsed.score !== undefined) {
       return {
         title: parsed.title || '',
         dimension: parsed.dimension || '',
@@ -1335,61 +1245,6 @@ const buildRubricV2Content = (data) => {
     dimension: data.dimension || '',
     score: data.score !== undefined ? parseInt(data.score) : null
   })
-}
-
-// ==================== V1 Rubric 格式解析与编辑 ====================
-const parseRubricV1 = (content) => {
-  try {
-    const parsed = JSON.parse(content)
-    return {
-      title: parsed.title || '',
-      checklist: parsed.checklist || '',
-      score: parsed.score !== undefined ? parsed.score : null,
-      dimension: parsed.dimension || ''
-    }
-  } catch (e) {
-    // 如果不是JSON格式，返回默认值
-    return {
-      title: content,
-      checklist: '',
-      score: null,
-      dimension: ''
-    }
-  }
-}
-
-const buildRubricV1Content = (data) => {
-  return JSON.stringify({
-    title: data.title || '',
-    checklist: data.checklist || '',
-    score: data.score !== undefined ? parseInt(data.score) : null,
-    dimension: data.dimension || ''
-  })
-}
-
-const editRubricUser = (rubric) => {
-  openModal('编辑Rubric', [
-    { label: '内容', type: 'textarea', value: rubric.content, placeholder: '请输入rubric内容' }
-  ], async (fields) => {
-    try {
-      await axios.patch(`/api/rubrics/${rubric.id}/content`, {
-        content: fields[0].value
-      })
-      await selectTask(selectedTaskId.value)
-    } catch (err) {
-      alert('编辑失败: ' + (err.response?.data?.detail || err.message))
-    }
-  })
-}
-
-const deleteRubricUser = async (rubricId) => {
-  if (!confirm('确定要删除这个rubric吗？')) return
-  try {
-    await axios.delete(`/api/rubrics/${rubricId}`)
-    await selectTask(selectedTaskId.value)
-  } catch (err) {
-    alert('删除失败: ' + (err.response?.data?.detail || err.message))
-  }
 }
 
 // ==================== 标准答案行内编辑 ====================
@@ -1431,11 +1286,10 @@ const showAddReferenceAnswerModal = () => {
   ], async (fields) => {
     try {
       const url = isRoot.value ? '/api/admin/reference-answers' : '/api/reference-answers'
-      const version = displayVersion.value === 'V1' ? 1 : 2
       await axios.post(url, {
         task_id: selectedTaskId.value,
         content: fields[0].value,
-        version: version
+        version: 2
       })
       await selectTask(selectedTaskId.value)
     } catch (err) {
@@ -1494,9 +1348,8 @@ const selectTask = async (taskId) => {
   selectedTaskId.value = taskId
 
   try {
-    // 根据当前显示的版本获取对应rubric
-    const version = displayVersion.value === 'V1' ? 1 : 2
-    const res = await axios.get(`/api/tasks/${taskId}?version=${version}`)
+    // 获取V2版本数据
+    const res = await axios.get(`/api/tasks/${taskId}?version=2`)
     currentTask.value = res.data
   } catch (err) {
     console.error('加载任务详情失败:', err)
@@ -2558,230 +2411,6 @@ onMounted(() => {
   background: #a8a8a8;
 }
 
-/* 版本切换按钮样式 */
-.version-toggle {
-  display: flex;
-  gap: 4px;
-  background: #f0f0f0;
-  padding: 2px;
-  border-radius: 4px;
-}
-
-.version-btn {
-  padding: 4px 12px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  border-radius: 3px;
-  transition: all 0.2s;
-  color: #666;
-}
-
-.version-btn:hover {
-  color: #1890ff;
-}
-
-.version-btn.active {
-  background: white;
-  color: #1890ff;
-  font-weight: 500;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-/* V1 Rubric 样式 */
-.rubric-item-v1 {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px;
-  background: #fafafa;
-  border-radius: 8px;
-  border: 2px solid transparent;
-  transition: all 0.2s;
-}
-
-.rubric-item-v1:hover {
-  background: #f0f0f0;
-  border-color: #d9d9d9;
-}
-
-.rubric-item-v1.selected {
-  background: #e6f7ff;
-  border-color: #1890ff;
-}
-
-/* 负分rubric样式 */
-.rubric-item-v1.negative-score {
-  border-color: #ff4d4f;
-  background: #fff2f0;
-}
-
-.rubric-item-v1.negative-score:hover {
-  border-color: #ff7875;
-  background: #fff1f0;
-}
-
-/* 每一行的基础样式 */
-.rubric-v1-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 32px;
-}
-
-/* 第一行：标题 */
-.rubric-v1-title-wrapper {
-  flex: 1;
-  min-width: 0;
-}
-
-.rubric-v1-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #333;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: all 0.2s;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.4;
-}
-
-.rubric-v1-title:hover {
-  background: white;
-}
-
-.rubric-v1-title-input {
-  width: 100%;
-  font-size: 15px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border: 2px solid #1890ff;
-  border-radius: 4px;
-  outline: none;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.4;
-  resize: vertical;
-  min-height: 40px;
-  height: auto;
-  overflow: hidden;
-  field-sizing: content;
-}
-
-/* 第二行：checklist */
-.checklist-row {
-  margin-left: 32px;
-}
-
-.rubric-v1-checklist-wrapper {
-  flex: 1;
-  min-width: 0;
-}
-
-.rubric-v1-checklist {
-  font-size: 14px;
-  color: #333;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: all 0.2s;
-  background: white;
-  border: 1px solid #e8e8e8;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.rubric-v1-checklist:hover {
-  border-color: #d9d9d9;
-}
-
-.rubric-v1-checklist-input {
-  width: 100%;
-  font-size: 14px;
-  padding: 6px 8px;
-  border: 2px solid #1890ff;
-  border-radius: 4px;
-  outline: none;
-  resize: vertical;
-  font-family: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.6;
-  min-height: 60px;
-  height: auto;
-  overflow: hidden;
-  field-sizing: content;
-}
-
-/* 第三行：维度 + 分数 */
-.meta-row {
-  margin-left: 32px;
-  gap: 24px;
-}
-
-.rubric-v1-dimension-wrapper,
-.rubric-v1-score-wrapper {
-  flex-shrink: 0;
-}
-
- .rubric-v1-dimension,
-.rubric-v1-score {
-  font-size: 13px;
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: 4px;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.rubric-v1-dimension:hover,
-.rubric-v1-score:hover {
-  background: white;
-}
-
-.meta-label {
-  color: #999;
-  font-size: 12px;
-}
-
-.meta-value {
-  color: #666;
-}
-
-.rubric-v1-dimension-input,
-.rubric-v1-score-input {
-  font-size: 13px;
-  padding: 2px 6px;
-  border: 2px solid #1890ff;
-  border-radius: 4px;
-  outline: none;
-  width: 100px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.rubric-v1-score-input {
-  width: 60px;
-  text-align: center;
-}
-
-.rubric-v1-actions {
-  flex-shrink: 0;
-}
-
-.rubric-v1-actions .rubric-actions {
-  display: flex;
-  gap: 4px;
-}
-
 /* V2 Rubric 样式 */
 .rubric-item-v2 {
   display: flex;
@@ -2962,15 +2591,12 @@ onMounted(() => {
 }
 
 /* 编辑状态下的样式 */
-.rubric-item-v1.editing,
 .rubric-item-v2.editing {
   border-color: #1890ff;
   background: #e6f7ff;
 }
 
-.rubric-v1-title.readonly,
-.rubric-v2-title.readonly,
-.rubric-v1-checklist.readonly {
+.rubric-v2-title.readonly {
   color: #999;
   cursor: default;
 }
