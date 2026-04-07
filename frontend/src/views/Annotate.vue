@@ -91,7 +91,6 @@
       <div class="column column-3">
         <div class="column-header">
           <span>标注详情</span>
-          <button v-if="isRoot && selectedTaskId" class="add-btn" @click="showAddRubricModal">+ 添加Rubric</button>
         </div>
         <div class="column-content">
           <div v-if="currentTask" class="annotation-panel">
@@ -102,16 +101,47 @@
                 v-for="rubric in currentTask.rubrics"
                 :key="rubric.id"
                 class="rubric-item"
-                @click="toggleRubric(rubric)"
               >
-                <div class="checkbox" :class="{ checked: rubric.selected }">
+                <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
                   <span v-if="rubric.selected">✓</span>
                 </div>
                 <div class="rubric-content">{{ rubric.content }}</div>
-                <div v-if="isRoot" class="rubric-actions" @click.stop>
+                <div v-if="isRoot" class="rubric-actions">
                   <button class="action-btn edit small" @click="editRubric(rubric)">✎</button>
                   <button class="action-btn delete small" @click="deleteRubric(rubric.id)">×</button>
                 </div>
+                <div v-else-if="rubric.created_by === userId" class="rubric-actions">
+                  <button class="action-btn edit small" @click="editRubricUser(rubric)" title="编辑">✎</button>
+                  <button class="action-btn delete small" @click="deleteRubricUser(rubric.id)" title="删除">×</button>
+                </div>
+              </div>
+              <div v-if="selectedTaskId" class="add-rubric-item" @click="showAddRubricModal">
+                <span class="add-icon">+</span>
+                <span class="add-text">添加Rubric</span>
+              </div>
+            </div>
+
+            <!-- 标准答案区域 -->
+            <div class="reference-answers-section" v-if="currentTask.reference_answers && currentTask.reference_answers.length > 0 || selectedTaskId">
+              <div class="section-divider">
+                <span class="divider-text">标准答案</span>
+              </div>
+              <div class="reference-answers-list">
+                <div
+                  v-for="answer in currentTask.reference_answers"
+                  :key="answer.id"
+                  class="reference-answer-item"
+                >
+                  <div class="reference-answer-content">{{ answer.content }}</div>
+                  <div class="reference-answer-actions">
+                    <button v-if="isRoot || answer.created_by === userId" class="action-btn edit small" @click="editReferenceAnswer(answer)" title="编辑">✎</button>
+                    <button v-if="isRoot || answer.created_by === userId" class="action-btn delete small" @click="deleteReferenceAnswer(answer.id)" title="删除">×</button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="selectedTaskId" class="add-reference-answer-item" @click="showAddReferenceAnswerModal">
+                <span class="add-icon">+</span>
+                <span class="add-text">添加标准答案</span>
               </div>
             </div>
 
@@ -158,6 +188,26 @@
         <div class="modal-footer">
           <button class="btn-cancel" @click="closeModal">取消</button>
           <button class="btn-confirm" @click="confirmModal">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全屏编辑 Modal 弹窗 -->
+    <div v-if="showFullscreenModal" class="modal-overlay fullscreen" @click="closeFullscreenModal">
+      <div class="modal-content fullscreen" @click.stop>
+        <div class="fullscreen-header">
+          <h3>{{ fullscreenModalTitle }}</h3>
+          <button class="btn-close" @click="closeFullscreenModal">✕</button>
+        </div>
+        <div class="fullscreen-body">
+          <textarea
+            v-model="fullscreenModalContent"
+            :placeholder="fullscreenModalPlaceholder"
+          ></textarea>
+        </div>
+        <div class="fullscreen-footer">
+          <button class="btn-cancel" @click="closeFullscreenModal">取消</button>
+          <button class="btn-confirm" @click="confirmFullscreenModal">确定</button>
         </div>
       </div>
     </div>
@@ -330,6 +380,7 @@ const parseCSVLine = (line) => {
 
 const router = useRouter()
 const phone = ref(localStorage.getItem('phone') || '')
+const userId = ref(parseInt(localStorage.getItem('userId') || '0'))
 const isRoot = ref(localStorage.getItem('isRoot') === 'true')
 const taskSets = ref([])
 const tasks = ref([])
@@ -359,6 +410,13 @@ const showModal = ref(false)
 const modalTitle = ref('')
 const modalFields = ref([])
 const modalAction = ref(null)
+
+// 全屏 Modal 相关
+const showFullscreenModal = ref(false)
+const fullscreenModalTitle = ref('')
+const fullscreenModalContent = ref('')
+const fullscreenModalPlaceholder = ref('')
+const fullscreenModalAction = ref(null)
 
 // 设置axios默认配置
 axios.defaults.headers.common['Authorization'] = `Bearer ${localStorage.getItem('token')}`
@@ -669,6 +727,26 @@ const confirmModal = async () => {
   closeModal()
 }
 
+// 全屏 Modal 操作
+const openFullscreenModal = (title, content, placeholder, action) => {
+  fullscreenModalTitle.value = title
+  fullscreenModalContent.value = content
+  fullscreenModalPlaceholder.value = placeholder
+  fullscreenModalAction.value = action
+  showFullscreenModal.value = true
+}
+
+const closeFullscreenModal = () => {
+  showFullscreenModal.value = false
+}
+
+const confirmFullscreenModal = async () => {
+  if (fullscreenModalAction.value) {
+    await fullscreenModalAction.value(fullscreenModalContent.value)
+  }
+  closeFullscreenModal()
+}
+
 // ==================== 任务集合管理 ====================
 const showAddTaskSetModal = () => {
   openModal('添加任务集合', [
@@ -769,10 +847,17 @@ const showAddRubricModal = () => {
     { label: '内容', type: 'textarea', value: '', placeholder: '请输入rubric内容' }
   ], async (fields) => {
     try {
-      await axios.post('/api/admin/rubrics', {
+      const url = isRoot.value ? '/api/admin/rubrics' : '/api/rubrics'
+      const res = await axios.post(url, {
         task_id: selectedTaskId.value,
         content: fields[0].value
       })
+      // 创建成功后，默认勾选这个新 rubric
+      if (res.data && res.data.id) {
+        await axios.patch(`/api/rubrics/${res.data.id}`, {
+          selected: true
+        })
+      }
       await selectTask(selectedTaskId.value)
     } catch (err) {
       alert('添加失败: ' + (err.response?.data?.detail || err.message))
@@ -799,6 +884,74 @@ const deleteRubric = async (rubricId) => {
   if (!confirm('确定要删除这个rubric吗？')) return
   try {
     await axios.delete(`/api/admin/rubrics/${rubricId}`)
+    await selectTask(selectedTaskId.value)
+  } catch (err) {
+    alert('删除失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+const editRubricUser = (rubric) => {
+  openModal('编辑Rubric', [
+    { label: '内容', type: 'textarea', value: rubric.content, placeholder: '请输入rubric内容' }
+  ], async (fields) => {
+    try {
+      await axios.patch(`/api/rubrics/${rubric.id}/content`, {
+        content: fields[0].value
+      })
+      await selectTask(selectedTaskId.value)
+    } catch (err) {
+      alert('编辑失败: ' + (err.response?.data?.detail || err.message))
+    }
+  })
+}
+
+const deleteRubricUser = async (rubricId) => {
+  if (!confirm('确定要删除这个rubric吗？')) return
+  try {
+    await axios.delete(`/api/rubrics/${rubricId}`)
+    await selectTask(selectedTaskId.value)
+  } catch (err) {
+    alert('删除失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+// ==================== 标准答案管理 ====================
+const showAddReferenceAnswerModal = () => {
+  openModal('添加标准答案', [
+    { label: '内容', type: 'textarea', value: '', placeholder: '请输入标准答案内容' }
+  ], async (fields) => {
+    try {
+      const url = isRoot.value ? '/api/admin/reference-answers' : '/api/reference-answers'
+      await axios.post(url, {
+        task_id: selectedTaskId.value,
+        content: fields[0].value
+      })
+      await selectTask(selectedTaskId.value)
+    } catch (err) {
+      alert('添加失败: ' + (err.response?.data?.detail || err.message))
+    }
+  })
+}
+
+const editReferenceAnswer = (answer) => {
+  openFullscreenModal('编辑标准答案', answer.content, '请输入标准答案内容', async (content) => {
+    try {
+      const url = isRoot.value ? `/api/admin/reference-answers/${answer.id}` : `/api/reference-answers/${answer.id}`
+      await axios.patch(url, {
+        content: content
+      })
+      await selectTask(selectedTaskId.value)
+    } catch (err) {
+      alert('编辑失败: ' + (err.response?.data?.detail || err.message))
+    }
+  })
+}
+
+const deleteReferenceAnswer = async (answerId) => {
+  if (!confirm('确定要删除这个标准答案吗？')) return
+  try {
+    const url = isRoot.value ? `/api/admin/reference-answers/${answerId}` : `/api/reference-answers/${answerId}`
+    await axios.delete(url)
     await selectTask(selectedTaskId.value)
   } catch (err) {
     alert('删除失败: ' + (err.response?.data?.detail || err.message))
@@ -1202,6 +1355,43 @@ onMounted(() => {
   gap: 12px;
 }
 
+.add-rubric-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f6ffed;
+  border: 2px dashed #b7eb8f;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.add-rubric-item:hover {
+  background: #d9f7be;
+  border-color: #73d13d;
+}
+
+.add-icon {
+  width: 24px;
+  height: 24px;
+  background: #52c41a;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.add-text {
+  color: #52c41a;
+  font-weight: 500;
+}
+
 .rubric-item {
   display: flex;
   align-items: flex-start;
@@ -1211,6 +1401,7 @@ onMounted(() => {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
+  min-height: 44px;
 }
 
 .rubric-item:hover {
@@ -1228,6 +1419,7 @@ onMounted(() => {
   flex-shrink: 0;
   margin-top: 2px;
   transition: all 0.2s;
+  flex-shrink: 0;
 }
 
 .checkbox.checked {
@@ -1246,12 +1438,19 @@ onMounted(() => {
   color: #333;
   line-height: 1.6;
   word-wrap: break-word;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+  padding-right: 8px;
 }
 
 .rubric-actions {
   display: flex;
   gap: 4px;
   margin-left: 8px;
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .action-buttons {
@@ -1401,6 +1600,84 @@ onMounted(() => {
   background: #40a9ff;
 }
 
+/* 全屏 Modal 样式 */
+.modal-overlay.fullscreen {
+  padding: 0;
+}
+
+.modal-content.fullscreen {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e8e8e8;
+  background: #fff;
+}
+
+.fullscreen-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.fullscreen-header .btn-close {
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.fullscreen-header .btn-close:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.fullscreen-body {
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+}
+
+.fullscreen-body textarea {
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  border: none;
+  resize: none;
+  font-size: 16px;
+  line-height: 1.8;
+  font-family: inherit;
+  outline: none;
+}
+
+.fullscreen-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e8e8e8;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  background: #fff;
+}
+
 /* 任务分配管理样式 */
 .assign-body {
   padding: 20px;
@@ -1490,6 +1767,105 @@ onMounted(() => {
   text-align: center;
   color: #999;
   padding: 20px;
+}
+
+/* 标准答案样式 */
+.reference-answers-section {
+  margin-top: 24px;
+}
+
+.section-divider {
+  display: flex;
+  align-items: center;
+  margin: 24px 0 16px 0;
+}
+
+.section-divider::before,
+.section-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.divider-text {
+  padding: 0 16px;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.reference-answers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reference-answer-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.reference-answer-item:hover {
+  background: #d9f7be;
+}
+
+.reference-answer-content {
+  flex: 1;
+  color: #333;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+.reference-answer-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.add-reference-answer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #fff7e6;
+  border: 2px dashed #ffd591;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 12px;
+}
+
+.add-reference-answer-item:hover {
+  background: #ffe7ba;
+  border-color: #ffc53d;
+}
+
+.add-reference-answer-item .add-icon {
+  width: 24px;
+  height: 24px;
+  background: #fa8c16;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.add-reference-answer-item .add-text {
+  color: #fa8c16;
+  font-weight: 500;
 }
 
 /* 批量导入样式 */

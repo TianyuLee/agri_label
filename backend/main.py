@@ -4,10 +4,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from database import get_db, init_db
 from models import (
     UserRegister, UserLogin, UserResponse,
-    TaskSet, Task, Rubric, TaskWithRubrics,
+    TaskSet, Task, Rubric, TaskWithRubrics, TaskWithDetails,
     RubricUpdate, TaskCompleteRequest,
     TaskSetCreate, TaskSetUpdate, TaskCreate, TaskUpdate,
-    RubricCreate, RubricUpdateContent
+    RubricCreate, RubricUpdateContent,
+    ReferenceAnswer, ReferenceAnswerCreate, ReferenceAnswerUpdate
 )
 import hashlib
 import jwt
@@ -19,7 +20,7 @@ app = FastAPI(title="标注系统API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost", "http://127.0.0.1", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -193,8 +194,8 @@ def get_tasks(task_set_id: int, user: dict = Depends(get_current_user_with_root)
     conn.close()
     return [Task(**dict(t)) for t in tasks]
 
-# 获取任务详情（含rubrics）
-@app.get("/api/tasks/{task_id}", response_model=TaskWithRubrics)
+# 获取任务详情（含rubrics和标准答案）
+@app.get("/api/tasks/{task_id}", response_model=TaskWithDetails)
 def get_task_detail(task_id: int, current_user: int = Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
@@ -209,12 +210,16 @@ def get_task_detail(task_id: int, current_user: int = Depends(get_current_user))
     cursor.execute("SELECT * FROM rubrics WHERE task_id = ? ORDER BY id", (task_id,))
     rubrics = cursor.fetchall()
 
+    cursor.execute("SELECT * FROM reference_answers WHERE task_id = ? ORDER BY id", (task_id,))
+    reference_answers = cursor.fetchall()
+
     conn.close()
 
     task_dict = dict(task)
     task_dict["rubrics"] = [Rubric(**dict(r)) for r in rubrics]
+    task_dict["reference_answers"] = [ReferenceAnswer(**dict(r)) for r in reference_answers]
 
-    return TaskWithRubrics(**task_dict)
+    return TaskWithDetails(**task_dict)
 
 # 更新rubric选择状态
 @app.patch("/api/rubrics/{rubric_id}", response_model=Rubric)
@@ -234,6 +239,58 @@ def update_rubric(rubric_id: int, data: RubricUpdate, current_user: int = Depend
         raise HTTPException(status_code=404, detail="rubric不存在")
 
     return Rubric(**dict(rubric))
+
+# 创建rubric（普通用户，只能给自己分配的任务添加）
+@app.post("/api/rubrics", response_model=Rubric)
+def create_rubric_user(data: RubricCreate, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查任务是否存在
+    cursor.execute("SELECT id FROM tasks WHERE id = ?", (data.task_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 检查该任务是否分配给了当前用户
+    cursor.execute("SELECT 1 FROM user_tasks WHERE user_id = ? AND task_id = ?",
+                   (current_user, data.task_id))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=403, detail="没有权限为此任务添加rubric")
+
+    cursor.execute("INSERT INTO rubrics (task_id, content, created_by) VALUES (?, ?, ?)",
+                   (data.task_id, data.content, current_user))
+    conn.commit()
+    rubric_id = cursor.lastrowid
+
+    cursor.execute("SELECT * FROM rubrics WHERE id = ?", (rubric_id,))
+    rubric = cursor.fetchone()
+    conn.close()
+    return Rubric(**dict(rubric))
+
+# 删除rubric（普通用户只能删除自己创建的）
+@app.delete("/api/rubrics/{rubric_id}")
+def delete_rubric_user(rubric_id: int, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查rubric是否存在
+    cursor.execute("SELECT * FROM rubrics WHERE id = ?", (rubric_id,))
+    rubric = cursor.fetchone()
+    if not rubric:
+        conn.close()
+        raise HTTPException(status_code=404, detail="rubric不存在")
+
+    # 检查是否是创建者
+    if rubric["created_by"] != current_user:
+        conn.close()
+        raise HTTPException(status_code=403, detail="只能删除自己添加的rubric")
+
+    cursor.execute("DELETE FROM rubrics WHERE id = ?", (rubric_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
 
 # 完成任务
 @app.patch("/api/tasks/{task_id}/complete", response_model=Task)
@@ -440,6 +497,31 @@ def delete_rubric(rubric_id: int, current_user: dict = Depends(require_root)):
     conn.close()
     return {"message": "删除成功"}
 
+# 更新rubric内容（普通用户只能更新自己创建的）
+@app.patch("/api/rubrics/{rubric_id}/content", response_model=Rubric)
+def update_rubric_content_user(rubric_id: int, data: RubricUpdateContent, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM rubrics WHERE id = ?", (rubric_id,))
+    rubric = cursor.fetchone()
+    if not rubric:
+        conn.close()
+        raise HTTPException(status_code=404, detail="rubric不存在")
+
+    # 检查是否是创建者
+    if rubric["created_by"] != current_user:
+        conn.close()
+        raise HTTPException(status_code=403, detail="只能编辑自己添加的rubric")
+
+    cursor.execute("UPDATE rubrics SET content = ? WHERE id = ?", (data.content, rubric_id))
+    conn.commit()
+
+    cursor.execute("SELECT * FROM rubrics WHERE id = ?", (rubric_id,))
+    updated = cursor.fetchone()
+    conn.close()
+    return Rubric(**dict(updated))
+
 
 # ==================== Root 切换用户视图接口 ====================
 
@@ -571,6 +653,144 @@ def get_user_unassigned_tasks(user_id: int, current_user: dict = Depends(require
     conn.close()
     return [{"id": t["id"], "query": t["query"],
              "task_set_name": t["task_set_name"]} for t in tasks]
+
+
+# ==================== 标准答案管理接口 ====================
+
+# 获取任务的标准答案列表
+@app.get("/api/tasks/{task_id}/reference-answers", response_model=List[ReferenceAnswer])
+def get_reference_answers(task_id: int, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM reference_answers WHERE task_id = ? ORDER BY id", (task_id,))
+    answers = cursor.fetchall()
+    conn.close()
+
+    return [ReferenceAnswer(**dict(a)) for a in answers]
+
+# 创建标准答案（仅root）
+@app.post("/api/admin/reference-answers", response_model=ReferenceAnswer)
+def create_reference_answer(data: ReferenceAnswerCreate, current_user: dict = Depends(require_root)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查任务是否存在
+    cursor.execute("SELECT id FROM tasks WHERE id = ?", (data.task_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    cursor.execute("INSERT INTO reference_answers (task_id, content, created_by) VALUES (?, ?, ?)",
+                   (data.task_id, data.content, current_user["id"]))
+    conn.commit()
+    answer_id = cursor.lastrowid
+
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    answer = cursor.fetchone()
+    conn.close()
+    return ReferenceAnswer(**dict(answer))
+
+# 创建标准答案（普通用户）
+@app.post("/api/reference-answers", response_model=ReferenceAnswer)
+def create_reference_answer_user(data: ReferenceAnswerCreate, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查任务是否存在
+    cursor.execute("SELECT id FROM tasks WHERE id = ?", (data.task_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    cursor.execute("INSERT INTO reference_answers (task_id, content, created_by) VALUES (?, ?, ?)",
+                   (data.task_id, data.content, current_user))
+    conn.commit()
+    answer_id = cursor.lastrowid
+
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    answer = cursor.fetchone()
+    conn.close()
+    return ReferenceAnswer(**dict(answer))
+
+# 删除标准答案（普通用户只能删除自己创建的）
+@app.delete("/api/reference-answers/{answer_id}")
+def delete_reference_answer_user(answer_id: int, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查标准答案是否存在
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    answer = cursor.fetchone()
+    if not answer:
+        conn.close()
+        raise HTTPException(status_code=404, detail="标准答案不存在")
+
+    # 检查是否是创建者
+    if answer["created_by"] != current_user:
+        conn.close()
+        raise HTTPException(status_code=403, detail="只能删除自己添加的标准答案")
+
+    cursor.execute("DELETE FROM reference_answers WHERE id = ?", (answer_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+# 更新标准答案（普通用户只能更新自己创建的）
+@app.patch("/api/reference-answers/{answer_id}", response_model=ReferenceAnswer)
+def update_reference_answer_user(answer_id: int, data: ReferenceAnswerUpdate, current_user: int = Depends(get_current_user)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    answer = cursor.fetchone()
+    if not answer:
+        conn.close()
+        raise HTTPException(status_code=404, detail="标准答案不存在")
+
+    # 检查是否是创建者
+    if answer["created_by"] != current_user:
+        conn.close()
+        raise HTTPException(status_code=403, detail="只能编辑自己添加的标准答案")
+
+    cursor.execute("UPDATE reference_answers SET content = ? WHERE id = ?", (data.content, answer_id))
+    conn.commit()
+
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    updated = cursor.fetchone()
+    conn.close()
+    return ReferenceAnswer(**dict(updated))
+
+# 删除标准答案（仅root，可删除任何）
+@app.delete("/api/admin/reference-answers/{answer_id}")
+def delete_reference_answer(answer_id: int, current_user: dict = Depends(require_root)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM reference_answers WHERE id = ?", (answer_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "删除成功"}
+
+# 更新标准答案（仅root，可更新任何）
+@app.patch("/api/admin/reference-answers/{answer_id}", response_model=ReferenceAnswer)
+def update_reference_answer(answer_id: int, data: ReferenceAnswerUpdate, current_user: dict = Depends(require_root)):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    answer = cursor.fetchone()
+    if not answer:
+        conn.close()
+        raise HTTPException(status_code=404, detail="标准答案不存在")
+
+    cursor.execute("UPDATE reference_answers SET content = ? WHERE id = ?", (data.content, answer_id))
+    conn.commit()
+
+    cursor.execute("SELECT * FROM reference_answers WHERE id = ?", (answer_id,))
+    updated = cursor.fetchone()
+    conn.close()
+    return ReferenceAnswer(**dict(updated))
+
 
 if __name__ == "__main__":
     import uvicorn

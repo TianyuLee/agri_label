@@ -1,7 +1,13 @@
 <template>
   <div class="login-container">
-    <div class="login-box">
-      <h1 class="title">标注系统</h1>
+    <div class="login-box" :class="isLogin ? 'login-mode' : 'register-mode'">
+      <div class="header">
+        <h1 class="system-title">标注系统</h1>
+        <div class="mode-badge" :class="isLogin ? 'login-badge' : 'register-badge'">
+          <span class="mode-icon">{{ isLogin ? '🔐' : '📝' }}</span>
+          <span class="mode-text">{{ isLogin ? '用户登录' : '账号注册' }}</span>
+        </div>
+      </div>
       <div class="form-container">
         <div class="input-group">
           <input
@@ -21,12 +27,20 @@
           >
         </div>
         <div v-if="error" class="error-message">{{ error }}</div>
-        <button class="submit-btn" @click="handleSubmit" :disabled="loading">
+        <button
+          class="submit-btn"
+          :class="isLogin ? 'login-btn' : 'register-btn'"
+          @click="handleSubmit"
+          :disabled="loading"
+        >
           {{ loading ? '处理中...' : (isLogin ? '登录' : '注册') }}
         </button>
         <div class="switch-mode">
-          <span @click="toggleMode">
-            {{ isLogin ? '还没有账号？去注册' : '已有账号？去登录' }}
+          <span
+            @click="toggleMode"
+            :class="isLogin ? 'login-switch' : 'register-switch'"
+          >
+            {{ isLogin ? '还没有账号？去注册 →' : '← 已有账号？去登录' }}
           </span>
         </div>
       </div>
@@ -115,14 +129,53 @@ const handleSubmit = async () => {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   width: 100%;
   max-width: 400px;
+  transition: border-color 0.3s ease;
+  border-top: 4px solid transparent;
 }
 
-.title {
+.login-mode {
+  border-top-color: #667eea;
+}
+
+.register-mode {
+  border-top-color: #11998e;
+}
+
+.header {
   text-align: center;
-  color: #333;
   margin-bottom: 30px;
+}
+
+.system-title {
+  color: #333;
   font-size: 28px;
   font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.login-badge {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.register-badge {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  color: white;
+}
+
+.mode-icon {
+  font-size: 16px;
 }
 
 .form-container {
@@ -154,7 +207,6 @@ const handleSubmit = async () => {
 .submit-btn {
   width: 100%;
   padding: 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -164,9 +216,22 @@ const handleSubmit = async () => {
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.submit-btn:hover:not(:disabled) {
+.login-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.login-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+}
+
+.register-btn {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+}
+
+.register-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 20px rgba(17, 153, 142, 0.4);
 }
 
 .submit-btn:disabled {
@@ -176,15 +241,31 @@ const handleSubmit = async () => {
 
 .switch-mode {
   text-align: center;
+  margin-top: 10px;
 }
 
 .switch-mode span {
-  color: #667eea;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
 }
 
-.switch-mode span:hover {
+.login-switch {
+  color: #667eea;
+}
+
+.login-switch:hover {
+  color: #764ba2;
+  text-decoration: underline;
+}
+
+.register-switch {
+  color: #11998e;
+}
+
+.register-switch:hover {
+  color: #0d7a71;
   text-decoration: underline;
 }
 </style>

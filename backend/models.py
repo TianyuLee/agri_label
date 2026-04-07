@@ -43,6 +43,7 @@ class Rubric(BaseModel):
     task_id: int
     content: str
     selected: bool
+    created_by: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -86,3 +87,32 @@ class RubricCreate(BaseModel):
 
 class RubricUpdateContent(BaseModel):
     content: str
+
+# 标准答案模型
+class ReferenceAnswer(BaseModel):
+    id: int
+    task_id: int
+    content: str
+    created_by: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+class ReferenceAnswerCreate(BaseModel):
+    task_id: int
+    content: str
+
+class ReferenceAnswerUpdate(BaseModel):
+    content: str
+
+class TaskWithDetails(BaseModel):
+    id: int
+    task_set_id: int
+    query: str
+    completed: bool
+    completed_at: Optional[datetime]
+    rubrics: List[Rubric]
+    reference_answers: List[ReferenceAnswer]
+
+    class Config:
+        from_attributes = True

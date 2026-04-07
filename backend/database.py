@@ -61,9 +61,25 @@ def init_db():
             task_id INTEGER NOT NULL,
             content TEXT NOT NULL,
             selected BOOLEAN DEFAULT 0,
-            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
         )
     """)
+
+    # 检查并添加 created_by 列（兼容旧数据库）
+    try:
+        cursor.execute("SELECT created_by FROM rubrics LIMIT 1")
+    except sqlite3.OperationalError:
+        # SQLite ALTER TABLE 不支持 DEFAULT CURRENT_TIMESTAMP，分步添加
+        cursor.execute("ALTER TABLE rubrics ADD COLUMN created_by INTEGER")
+        cursor.execute("ALTER TABLE rubrics ADD COLUMN created_at TIMESTAMP")
+        # 为现有记录设置默认时间
+        cursor.execute("UPDATE rubrics SET created_at = ? WHERE created_at IS NULL",
+                       (datetime.now().isoformat(),))
+        conn.commit()
+        print("添加 created_by 和 created_at 列到 rubrics 表")
 
     # 用户任务分配表（记录哪些任务分配给哪些用户）
     cursor.execute("""
@@ -75,6 +91,19 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
             UNIQUE(user_id, task_id)
+        )
+    """)
+
+    # 标准答案表
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reference_answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
         )
     """)
 
