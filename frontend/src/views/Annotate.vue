@@ -91,30 +91,266 @@
       <div class="column column-3">
         <div class="column-header">
           <span>标注详情</span>
+          <div v-if="selectedTaskId" class="version-toggle">
+            <button
+              class="version-btn"
+              :class="{ active: displayVersion === 'V1' }"
+              @click="displayVersion = 'V1'"
+            >
+              V1
+            </button>
+            <button
+              class="version-btn"
+              :class="{ active: displayVersion === 'V2' }"
+              @click="displayVersion = 'V2'"
+            >
+              V2
+            </button>
+          </div>
         </div>
         <div class="column-content">
           <div v-if="currentTask" class="annotation-panel">
             <div class="query-title">{{ currentTask.query }}</div>
 
             <div class="rubrics-list">
-              <div
-                v-for="rubric in currentTask.rubrics"
-                :key="rubric.id"
-                class="rubric-item"
-              >
-                <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
-                  <span v-if="rubric.selected">✓</span>
+              <!-- V1 版本：结构化显示 -->
+              <template v-if="displayVersion === 'V1'">
+                <div
+                  v-for="rubric in currentTask.rubrics"
+                  :key="rubric.id"
+                  class="rubric-item-v1"
+                  :class="{ selected: rubric.selected, editing: rubric.editingField, 'negative-score': parseRubricV1(rubric.content).score < 0 }"
+                >
+                  <!-- 编辑模式：显示输入框和保存/取消按钮 -->
+                  <template v-if="rubric.editingField">
+                    <!-- 标题编辑行 -->
+                    <div class="rubric-v1-row">
+                      <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
+                        <span v-if="rubric.selected">✓</span>
+                      </div>
+                      <div class="rubric-v1-title-wrapper">
+                        <textarea
+                          v-if="rubric.editingField === 'title'"
+                          v-model="rubric.editTitle"
+                          class="rubric-v1-title-input"
+                          placeholder="请输入标题"
+                          rows="2"
+                          @keyup.enter.ctrl="saveRubricV1Field(rubric)"
+                        ></textarea>
+                        <div v-else class="rubric-v1-title readonly">{{ parseRubricV1(rubric.content).title || '点击添加标题' }}</div>
+                      </div>
+                      <div class="edit-actions">
+                        <button class="btn-save" @click="saveRubricV1Field(rubric)">保存</button>
+                        <button class="btn-cancel" @click="cancelEditRubricV1(rubric)">取消</button>
+                      </div>
+                    </div>
+
+                    <!-- Checklist编辑行 -->
+                    <div class="rubric-v1-row checklist-row" v-if="rubric.editingField === 'checklist'">
+                      <div class="rubric-v1-checklist-wrapper">
+                        <textarea
+                          v-model="rubric.editChecklist"
+                          class="rubric-v1-checklist-input"
+                          placeholder="请输入checklist"
+                          rows="3"
+                        ></textarea>
+                      </div>
+                    </div>
+                    <div class="rubric-v1-row checklist-row" v-else>
+                      <div class="rubric-v1-checklist-wrapper">
+                        <div class="rubric-v1-checklist readonly">{{ parseRubricV1(rubric.content).checklist || '点击添加checklist' }}</div>
+                      </div>
+                    </div>
+
+                    <!-- 维度和分数编辑行 -->
+                    <div class="rubric-v1-row meta-row">
+                      <div class="rubric-v1-dimension-wrapper" v-if="rubric.editingField === 'dimension'">
+                        <input
+                          v-model="rubric.editDimension"
+                          class="rubric-v1-dimension-input"
+                          placeholder="请输入维度"
+                          @keyup.enter="saveRubricV1Field(rubric)"
+                        />
+                      </div>
+                      <div class="rubric-v1-dimension-wrapper" v-else @click="startEditRubricV1Field(rubric, 'dimension')">
+                        <div class="rubric-v1-dimension">
+                          <span class="meta-label">维度:</span>
+                          <span class="meta-value">{{ parseRubricV1(rubric.content).dimension || '点击添加' }}</span>
+                        </div>
+                      </div>
+
+                      <div class="rubric-v1-score-wrapper" v-if="rubric.editingField === 'score'">
+                        <input
+                          v-model.number="rubric.editScore"
+                          type="number"
+                          class="rubric-v1-score-input"
+                          placeholder="分数"
+                          @keyup.enter="saveRubricV1Field(rubric)"
+                        />
+                      </div>
+                      <div class="rubric-v1-score-wrapper" v-else @click="startEditRubricV1Field(rubric, 'score')">
+                        <div class="rubric-v1-score">
+                          <span class="meta-label">分数:</span>
+                          <span class="meta-value">{{ parseRubricV1(rubric.content).score !== null ? parseRubricV1(rubric.content).score : '点击添加' }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 非编辑模式：显示文本，点击可编辑 -->
+                  <template v-else>
+                    <!-- 第一行：标题 + 操作按钮 -->
+                    <div class="rubric-v1-row">
+                      <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
+                        <span v-if="rubric.selected">✓</span>
+                      </div>
+                      <div class="rubric-v1-title-wrapper" @click="startEditRubricV1Field(rubric, 'title')">
+                        <div class="rubric-v1-title">
+                          {{ parseRubricV1(rubric.content).title || '点击添加标题' }}
+                        </div>
+                      </div>
+                      <div class="rubric-v1-actions">
+                        <div class="rubric-actions">
+                          <button class="action-btn edit small" @click.stop="startEditRubricV1Field(rubric, 'title')" title="编辑">✎</button>
+                          <button class="action-btn delete small" @click.stop="deleteRubric(rubric.id)" title="删除">×</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 第二行：checklist -->
+                    <div class="rubric-v1-row checklist-row">
+                      <div class="rubric-v1-checklist-wrapper" @click="startEditRubricV1Field(rubric, 'checklist')">
+                        <div class="rubric-v1-checklist">
+                          {{ parseRubricV1(rubric.content).checklist || '点击添加checklist' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 第三行：维度 + 分数 -->
+                    <div class="rubric-v1-row meta-row">
+                      <div class="rubric-v1-dimension-wrapper" @click="startEditRubricV1Field(rubric, 'dimension')">
+                        <div class="rubric-v1-dimension">
+                          <span class="meta-label">维度:</span>
+                          <span class="meta-value">{{ parseRubricV1(rubric.content).dimension || '点击添加' }}</span>
+                        </div>
+                      </div>
+                      <div class="rubric-v1-score-wrapper" @click="startEditRubricV1Field(rubric, 'score')">
+                        <div class="rubric-v1-score">
+                          <span class="meta-label">分数:</span>
+                          <span class="meta-value">{{ parseRubricV1(rubric.content).score !== null ? parseRubricV1(rubric.content).score : '点击添加' }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
-                <div class="rubric-content">{{ rubric.content }}</div>
-                <div v-if="isRoot" class="rubric-actions">
-                  <button class="action-btn edit small" @click="editRubric(rubric)">✎</button>
-                  <button class="action-btn delete small" @click="deleteRubric(rubric.id)">×</button>
-                </div>
-                <div v-else-if="rubric.created_by === userId" class="rubric-actions">
-                  <button class="action-btn edit small" @click="editRubricUser(rubric)" title="编辑">✎</button>
-                  <button class="action-btn delete small" @click="deleteRubricUser(rubric.id)" title="删除">×</button>
-                </div>
+              </template>
+
+              <!-- V2 版本：结构化显示（标题、维度、分数） -->
+              <template v-else>
+                <div
+                  v-for="rubric in currentTask.rubrics"
+                  :key="rubric.id"
+                  class="rubric-item-v2"
+                  :class="{ selected: rubric.selected, editing: rubric.editingFieldV2, 'negative-score': parseRubricV2(rubric.content).score < 0 }"
+                >
+                  <!-- 编辑模式 -->
+                  <template v-if="rubric.editingFieldV2">
+                    <!-- 第一行：标题编辑 -->
+                    <div class="rubric-v2-row">
+                      <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
+                        <span v-if="rubric.selected">✓</span>
+                      </div>
+                      <div class="rubric-v2-title-wrapper">
+                        <textarea
+                          v-if="rubric.editingFieldV2 === 'title'"
+                          v-model="rubric.editTitleV2"
+                          class="rubric-v2-title-input"
+                          placeholder="请输入标题"
+                          rows="2"
+                          @keyup.ctrl.enter="saveRubricV2Field(rubric)"
+                        ></textarea>
+                        <div v-else class="rubric-v2-title readonly">{{ parseRubricV2(rubric.content).title || '点击添加标题' }}</div>
+                      </div>
+                      <div class="edit-actions">
+                        <button class="btn-save" @click="saveRubricV2Field(rubric)">保存</button>
+                        <button class="btn-cancel" @click="cancelEditRubricV2(rubric)">取消</button>
+                      </div>
+                    </div>
+
+                    <!-- 第二行：维度 + 分数 -->
+                    <div class="rubric-v2-row meta-row">
+                      <div class="rubric-v2-dimension-wrapper" v-if="rubric.editingFieldV2 === 'dimension'">
+                        <input
+                          v-model="rubric.editDimensionV2"
+                          class="rubric-v2-dimension-input"
+                          placeholder="请输入维度"
+                          @keyup.enter="saveRubricV2Field(rubric)"
+                        />
+                      </div>
+                      <div class="rubric-v2-dimension-wrapper" v-else @click="startEditRubricV2Field(rubric, 'dimension')">
+                        <div class="rubric-v2-dimension">
+                          <span class="meta-label">维度:</span>
+                          <span class="meta-value">{{ parseRubricV2(rubric.content).dimension || '点击添加' }}</span>
+                        </div>
+                      </div>
+
+                      <div class="rubric-v2-score-wrapper" v-if="rubric.editingFieldV2 === 'score'">
+                        <input
+                          v-model.number="rubric.editScoreV2"
+                          type="number"
+                          class="rubric-v2-score-input"
+                          placeholder="分数"
+                          @keyup.enter="saveRubricV2Field(rubric)"
+                        />
+                      </div>
+                      <div class="rubric-v2-score-wrapper" v-else @click="startEditRubricV2Field(rubric, 'score')">
+                        <div class="rubric-v2-score">
+                          <span class="meta-label">分数:</span>
+                          <span class="meta-value">{{ parseRubricV2(rubric.content).score !== null ? parseRubricV2(rubric.content).score : '点击添加' }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 非编辑模式 -->
+                  <template v-else>
+                    <!-- 第一行：标题 + 操作按钮 -->
+                    <div class="rubric-v2-row">
+                      <div class="checkbox" :class="{ checked: rubric.selected }" @click="toggleRubric(rubric)">
+                        <span v-if="rubric.selected">✓</span>
+                      </div>
+                      <div class="rubric-v2-title-wrapper" @click="startEditRubricV2Field(rubric, 'title')">
+                        <div class="rubric-v2-title">
+                          {{ parseRubricV2(rubric.content).title || '点击添加标题' }}
+                      </div>
+                    </div>
+                    <div class="rubric-v2-actions">
+                      <div class="rubric-actions">
+                        <button class="action-btn edit small" @click.stop="startEditRubricV2Field(rubric, 'title')" title="编辑">✎</button>
+                        <button class="action-btn delete small" @click.stop="deleteRubric(rubric.id)" title="删除">×</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 第二行：维度 + 分数 -->
+                  <div class="rubric-v2-row meta-row">
+                    <div class="rubric-v2-dimension-wrapper" @click="startEditRubricV2Field(rubric, 'dimension')">
+                      <div class="rubric-v2-dimension">
+                        <span class="meta-label">维度:</span>
+                        <span class="meta-value">{{ parseRubricV2(rubric.content).dimension || '点击添加' }}</span>
+                      </div>
+                    </div>
+                    <div class="rubric-v2-score-wrapper" @click="startEditRubricV2Field(rubric, 'score')">
+                      <div class="rubric-v2-score">
+                        <span class="meta-label">分数:</span>
+                        <span class="meta-value">{{ parseRubricV2(rubric.content).score !== null ? parseRubricV2(rubric.content).score : '点击添加' }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
               </div>
+            </template>
+
               <div v-if="selectedTaskId" class="add-rubric-item" @click="showAddRubricModal">
                 <span class="add-icon">+</span>
                 <span class="add-text">添加Rubric</span>
@@ -131,12 +367,29 @@
                   v-for="answer in currentTask.reference_answers"
                   :key="answer.id"
                   class="reference-answer-item"
+                  :class="{ editing: answer.isEditing }"
                 >
-                  <div class="reference-answer-content">{{ answer.content }}</div>
-                  <div class="reference-answer-actions">
-                    <button v-if="isRoot || answer.created_by === userId" class="action-btn edit small" @click="editReferenceAnswer(answer)" title="编辑">✎</button>
-                    <button v-if="isRoot || answer.created_by === userId" class="action-btn delete small" @click="deleteReferenceAnswer(answer.id)" title="删除">×</button>
-                  </div>
+                  <!-- 编辑模式 -->
+                  <template v-if="answer.isEditing">
+                    <textarea
+                      v-model="answer.editContent"
+                      class="reference-answer-input"
+                      placeholder="请输入标准答案内容"
+                      rows="4"
+                    ></textarea>
+                    <div class="edit-actions-inline">
+                      <button class="btn-save" @click="saveReferenceAnswerInline(answer)">保存</button>
+                      <button class="btn-cancel" @click="cancelEditReferenceAnswer(answer)">取消</button>
+                    </div>
+                  </template>
+                  <!-- 非编辑模式 -->
+                  <template v-else>
+                    <div class="reference-answer-content" @click="startEditReferenceAnswer(answer)">{{ answer.content }}</div>
+                    <div class="reference-answer-actions">
+                      <button class="action-btn edit small" @click.stop="startEditReferenceAnswer(answer)" title="编辑">✎</button>
+                      <button class="action-btn delete small" @click.stop="deleteReferenceAnswer(answer.id)" title="删除">×</button>
+                    </div>
+                  </template>
                 </div>
               </div>
               <div v-if="selectedTaskId" class="add-reference-answer-item" @click="showAddReferenceAnswerModal">
@@ -221,12 +474,12 @@
             <label class="file-input-label">
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".csv"
                 @change="handleFileSelect"
                 ref="fileInput"
                 style="display: none"
               />
-              <span class="file-input-btn">选择 Excel/CSV 文件</span>
+              <span class="file-input-btn">选择 CSV 文件</span>
               <span class="file-name">{{ importFile?.name || '未选择文件' }}</span>
             </label>
             <div class="import-hint">
@@ -236,8 +489,10 @@
                 <li>第2列：任务集合名称</li>
                 <li>第3列：任务名称</li>
                 <li>第4列：Rubric 内容</li>
+                <li>第5列：维度（可选）</li>
+                <li>第6列：分数（可选，默认为0）</li>
               </ul>
-              <p class="hint-note">注：每行一条记录，系统会自动创建不存在的任务集合</p>
+              <p class="hint-note">注：请使用UTF-8编码的CSV文件。Excel用户请另存为CSV格式：文件 -> 另存为 -> CSV (逗号分隔)(*.csv)</p>
             </div>
           </div>
 
@@ -251,6 +506,8 @@
                     <th>任务集合</th>
                     <th>任务名称</th>
                     <th>Rubric</th>
+                    <th>维度</th>
+                    <th>分数</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -259,9 +516,11 @@
                     <td>{{ item.taskSetName }}</td>
                     <td>{{ item.taskName }}</td>
                     <td :title="item.rubric">{{ item.rubric.slice(0, 30) }}{{ item.rubric.length > 30 ? '...' : '' }}</td>
+                    <td>{{ item.dimension || '-' }}</td>
+                    <td>{{ item.score }}</td>
                   </tr>
                   <tr v-if="importPreview.length > 10">
-                    <td colspan="4" class="more-rows">... 还有 {{ importPreview.length - 10 }} 条记录</td>
+                    <td colspan="6" class="more-rows">... 还有 {{ importPreview.length - 10 }} 条记录</td>
                   </tr>
                 </tbody>
               </table>
@@ -325,36 +584,56 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
-// 简单的 Excel/CSV 解析函数
+// CSV 解析函数
 const parseExcelFile = (file) => {
   return new Promise((resolve, reject) => {
+    const fileName = file.name.toLowerCase()
+    const isCsv = fileName.endsWith('.csv')
+
+    if (!isCsv) {
+      reject(new Error('请上传 .csv 格式的文件。Excel用户请另存为CSV格式：文件 -> 另存为 -> CSV (逗号分隔)(*.csv)'))
+      return
+    }
+
     const reader = new FileReader()
     reader.onload = (e) => {
-      const data = e.target.result
-      const lines = data.split('\n').filter(line => line.trim())
-      const result = []
-      for (const line of lines) {
-        // 支持 CSV 格式（逗号分隔）和 Tab 分隔
-        const cells = line.includes('\t')
-          ? line.split('\t')
-          : parseCSVLine(line)
-        if (cells.length >= 4) {
-          result.push({
-            phone: cells[0].trim(),
-            taskSetName: cells[1].trim(),
-            taskName: cells[2].trim(),
-            rubric: cells[3].trim()
-          })
-        }
+      let data = e.target.result
+
+      // 去除 UTF-8 BOM 标记
+      if (data.charCodeAt(0) === 0xFEFF) {
+        data = data.substring(1)
       }
-      resolve(result)
+
+      try {
+        const lines = data.split('\n').filter(line => line.trim())
+        const result = []
+        for (const line of lines) {
+          // 支持 CSV 格式（逗号分隔）和 Tab 分隔
+          const cells = line.includes('\t')
+            ? line.split('\t')
+            : parseCSVLine(line)
+          if (cells.length >= 4) {
+            result.push({
+              phone: cells[0].trim(),
+              taskSetName: cells[1].trim(),
+              taskName: cells[2].trim(),
+              rubric: cells[3].trim(),
+              dimension: cells[4]?.trim() || '',
+              score: cells[5]?.trim() || '0'
+            })
+          }
+        }
+        resolve(result)
+      } catch (err) {
+        reject(new Error('文件解析失败，请确保文件是UTF-8编码的CSV格式'))
+      }
     }
     reader.onerror = reject
-    reader.readAsText(file)
+    reader.readAsText(file, 'UTF-8')
   })
 }
 
@@ -417,6 +696,16 @@ const fullscreenModalTitle = ref('')
 const fullscreenModalContent = ref('')
 const fullscreenModalPlaceholder = ref('')
 const fullscreenModalAction = ref(null)
+
+// 版本切换
+const displayVersion = ref('V2') // 'V1' 或 'V2'
+
+// 监听版本变化，自动刷新当前任务
+watch(displayVersion, async (newVersion) => {
+  if (selectedTaskId.value) {
+    await selectTask(selectedTaskId.value)
+  }
+})
 
 // 设置axios默认配置
 axios.defaults.headers.common['Authorization'] = `Bearer ${localStorage.getItem('token')}`
@@ -544,7 +833,11 @@ const handleFileSelect = async (event) => {
     }
   } catch (err) {
     console.error('解析文件失败:', err)
-    alert('文件解析失败，请确保文件格式正确')
+    alert('文件解析失败: ' + (err.message || '请确保文件格式正确'))
+    // 清空文件选择，允许重新选择
+    event.target.value = ''
+    importFile.value = null
+    importPreview.value = []
   }
 }
 
@@ -630,9 +923,17 @@ const confirmImport = async () => {
 
       // 4. 创建 Rubric（如果不存在）
       if (!rubricExists) {
+        // 构建V1格式的rubric内容（包含维度、分数）
+        const rubricContent = JSON.stringify({
+          title: item.rubric,
+          checklist: '',
+          score: parseInt(item.score) || 0,
+          dimension: item.dimension || ''
+        })
         await axios.post('/api/admin/rubrics', {
           task_id: taskId,
-          content: item.rubric
+          content: rubricContent,
+          version: 1
         })
         taskRubricsCache[taskId].add(item.rubric)
       }
@@ -842,27 +1143,46 @@ const deleteTask = async (taskId) => {
 }
 
 // ==================== Rubric 管理 ====================
-const showAddRubricModal = () => {
-  openModal('添加Rubric', [
-    { label: '内容', type: 'textarea', value: '', placeholder: '请输入rubric内容' }
-  ], async (fields) => {
-    try {
-      const url = isRoot.value ? '/api/admin/rubrics' : '/api/rubrics'
-      const res = await axios.post(url, {
-        task_id: selectedTaskId.value,
-        content: fields[0].value
-      })
-      // 创建成功后，默认勾选这个新 rubric
-      if (res.data && res.data.id) {
-        await axios.patch(`/api/rubrics/${res.data.id}`, {
-          selected: true
-        })
+const showAddRubricModal = async () => {
+  // 先创建空的rubric
+  const version = displayVersion.value === 'V1' ? 1 : 2
+  const emptyContent = version === 1
+    ? buildRubricV1Content({ title: '', checklist: '', score: null, dimension: '' })
+    : buildRubricV2Content({ title: '', dimension: '', score: null })
+
+  try {
+    const url = isRoot.value ? '/api/admin/rubrics' : '/api/rubrics'
+    const res = await axios.post(url, {
+      task_id: selectedTaskId.value,
+      content: emptyContent,
+      version: version
+    })
+
+    if (res.data && res.data.id) {
+      // 默认勾选新rubric
+      await axios.patch(`/api/rubrics/${res.data.id}`, { selected: true })
+
+      // 将新rubric添加到当前列表
+      const newRubric = {
+        ...res.data,
+        selected: true,
+        content: emptyContent
       }
-      await selectTask(selectedTaskId.value)
-    } catch (err) {
-      alert('添加失败: ' + (err.response?.data?.detail || err.message))
+
+      if (currentTask.value) {
+        currentTask.value.rubrics.push(newRubric)
+
+        // 自动进入编辑模式（标题字段）
+        if (version === 1) {
+          startEditRubricV1Field(newRubric, 'title')
+        } else {
+          startEditRubricV2Field(newRubric, 'title')
+        }
+      }
     }
-  })
+  } catch (err) {
+    alert('添加失败: ' + (err.response?.data?.detail || err.message))
+  }
 }
 
 const editRubric = (rubric) => {
@@ -870,7 +1190,8 @@ const editRubric = (rubric) => {
     { label: '内容', type: 'textarea', value: rubric.content, placeholder: '请输入rubric内容' }
   ], async (fields) => {
     try {
-      await axios.patch(`/api/admin/rubrics/${rubric.id}/content`, {
+      const url = isRoot.value ? `/api/admin/rubrics/${rubric.id}/content` : `/api/rubrics/${rubric.id}/content`
+      await axios.patch(url, {
         content: fields[0].value
       })
       await selectTask(selectedTaskId.value)
@@ -883,11 +1204,167 @@ const editRubric = (rubric) => {
 const deleteRubric = async (rubricId) => {
   if (!confirm('确定要删除这个rubric吗？')) return
   try {
-    await axios.delete(`/api/admin/rubrics/${rubricId}`)
+    await axios.delete(`/api/rubrics/${rubricId}`)
     await selectTask(selectedTaskId.value)
   } catch (err) {
     alert('删除失败: ' + (err.response?.data?.detail || err.message))
   }
+}
+
+// ==================== V1 Rubric 行内编辑 ====================
+const startEditRubricV1Field = (rubric, field) => {
+  // 先取消其他所有rubric的编辑状态
+  if (currentTask.value) {
+    currentTask.value.rubrics.forEach(r => {
+      r.editingField = null
+    })
+  }
+
+  const parsed = parseRubricV1(rubric.content)
+  rubric.editingField = field
+  rubric.editTitle = parsed.title
+  rubric.editChecklist = parsed.checklist
+  rubric.editDimension = parsed.dimension
+  rubric.editScore = parsed.score
+}
+
+const cancelEditRubricV1 = (rubric) => {
+  rubric.editingField = null
+}
+
+const saveRubricV1Field = async (rubric) => {
+  const parsed = parseRubricV1(rubric.content)
+
+  // 根据当前编辑的字段更新数据
+  if (rubric.editingField === 'title') {
+    parsed.title = rubric.editTitle || ''
+  } else if (rubric.editingField === 'checklist') {
+    parsed.checklist = rubric.editChecklist || ''
+  } else if (rubric.editingField === 'dimension') {
+    parsed.dimension = rubric.editDimension || ''
+  } else if (rubric.editingField === 'score') {
+    parsed.score = rubric.editScore !== '' ? parseInt(rubric.editScore) : null
+  }
+
+  const newContent = buildRubricV1Content(parsed)
+  if (newContent !== rubric.content) {
+    try {
+      const url = isRoot.value ? `/api/admin/rubrics/${rubric.id}/content` : `/api/rubrics/${rubric.id}/content`
+      await axios.patch(url, { content: newContent })
+      rubric.content = newContent
+    } catch (err) {
+      console.error('保存失败:', err)
+      alert('保存失败: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+  rubric.editingField = null
+}
+
+// ==================== V2 Rubric 行内编辑 ====================
+const startEditRubricV2Field = (rubric, field) => {
+  // 先取消其他所有rubric的编辑状态
+  if (currentTask.value) {
+    currentTask.value.rubrics.forEach(r => {
+      r.editingFieldV2 = null
+    })
+  }
+
+  const parsed = parseRubricV2(rubric.content)
+  rubric.editingFieldV2 = field
+  rubric.editTitleV2 = parsed.title
+  rubric.editDimensionV2 = parsed.dimension
+  rubric.editScoreV2 = parsed.score
+}
+
+const cancelEditRubricV2 = (rubric) => {
+  rubric.editingFieldV2 = null
+}
+
+const saveRubricV2Field = async (rubric) => {
+  const parsed = parseRubricV2(rubric.content)
+
+  // 根据当前编辑的字段更新数据
+  if (rubric.editingFieldV2 === 'title') {
+    parsed.title = rubric.editTitleV2 || ''
+  } else if (rubric.editingFieldV2 === 'dimension') {
+    parsed.dimension = rubric.editDimensionV2 || ''
+  } else if (rubric.editingFieldV2 === 'score') {
+    parsed.score = rubric.editScoreV2 !== '' ? parseInt(rubric.editScoreV2) : null
+  }
+
+  const newContent = buildRubricV2Content(parsed)
+  if (newContent !== rubric.content) {
+    try {
+      const url = isRoot.value ? `/api/admin/rubrics/${rubric.id}/content` : `/api/rubrics/${rubric.id}/content`
+      await axios.patch(url, { content: newContent })
+      rubric.content = newContent
+    } catch (err) {
+      console.error('保存失败:', err)
+      alert('保存失败: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+  rubric.editingFieldV2 = null
+}
+
+// ==================== V2 Rubric 格式解析与编辑（与V1独立） ====================
+const parseRubricV2 = (content) => {
+  try {
+    const parsed = JSON.parse(content)
+    // V2格式检查：必须包含title, dimension, score字段，不包含checklist
+    if (parsed.title !== undefined && parsed.dimension !== undefined && parsed.score !== undefined && parsed.checklist === undefined) {
+      return {
+        title: parsed.title || '',
+        dimension: parsed.dimension || '',
+        score: parsed.score !== undefined ? parsed.score : null
+      }
+    }
+  } catch (e) {
+    // 如果不是JSON格式，返回默认值
+  }
+  // 返回V2默认值
+  return {
+    title: content,
+    dimension: '',
+    score: null
+  }
+}
+
+const buildRubricV2Content = (data) => {
+  return JSON.stringify({
+    title: data.title || '',
+    dimension: data.dimension || '',
+    score: data.score !== undefined ? parseInt(data.score) : null
+  })
+}
+
+// ==================== V1 Rubric 格式解析与编辑 ====================
+const parseRubricV1 = (content) => {
+  try {
+    const parsed = JSON.parse(content)
+    return {
+      title: parsed.title || '',
+      checklist: parsed.checklist || '',
+      score: parsed.score !== undefined ? parsed.score : null,
+      dimension: parsed.dimension || ''
+    }
+  } catch (e) {
+    // 如果不是JSON格式，返回默认值
+    return {
+      title: content,
+      checklist: '',
+      score: null,
+      dimension: ''
+    }
+  }
+}
+
+const buildRubricV1Content = (data) => {
+  return JSON.stringify({
+    title: data.title || '',
+    checklist: data.checklist || '',
+    score: data.score !== undefined ? parseInt(data.score) : null,
+    dimension: data.dimension || ''
+  })
 }
 
 const editRubricUser = (rubric) => {
@@ -915,6 +1392,38 @@ const deleteRubricUser = async (rubricId) => {
   }
 }
 
+// ==================== 标准答案行内编辑 ====================
+const startEditReferenceAnswer = (answer) => {
+  // 先取消其他所有答案的编辑状态
+  if (currentTask.value && currentTask.value.reference_answers) {
+    currentTask.value.reference_answers.forEach(a => {
+      a.isEditing = false
+    })
+  }
+  answer.isEditing = true
+  answer.editContent = answer.content
+}
+
+const cancelEditReferenceAnswer = (answer) => {
+  answer.isEditing = false
+}
+
+const saveReferenceAnswerInline = async (answer) => {
+  if (answer.editContent !== answer.content) {
+    try {
+      const url = isRoot.value ? `/api/admin/reference-answers/${answer.id}` : `/api/reference-answers/${answer.id}`
+      await axios.patch(url, {
+        content: answer.editContent
+      })
+      answer.content = answer.editContent
+    } catch (err) {
+      console.error('保存失败:', err)
+      alert('保存失败: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+  answer.isEditing = false
+}
+
 // ==================== 标准答案管理 ====================
 const showAddReferenceAnswerModal = () => {
   openModal('添加标准答案', [
@@ -922,27 +1431,15 @@ const showAddReferenceAnswerModal = () => {
   ], async (fields) => {
     try {
       const url = isRoot.value ? '/api/admin/reference-answers' : '/api/reference-answers'
+      const version = displayVersion.value === 'V1' ? 1 : 2
       await axios.post(url, {
         task_id: selectedTaskId.value,
-        content: fields[0].value
+        content: fields[0].value,
+        version: version
       })
       await selectTask(selectedTaskId.value)
     } catch (err) {
       alert('添加失败: ' + (err.response?.data?.detail || err.message))
-    }
-  })
-}
-
-const editReferenceAnswer = (answer) => {
-  openFullscreenModal('编辑标准答案', answer.content, '请输入标准答案内容', async (content) => {
-    try {
-      const url = isRoot.value ? `/api/admin/reference-answers/${answer.id}` : `/api/reference-answers/${answer.id}`
-      await axios.patch(url, {
-        content: content
-      })
-      await selectTask(selectedTaskId.value)
-    } catch (err) {
-      alert('编辑失败: ' + (err.response?.data?.detail || err.message))
     }
   })
 }
@@ -997,7 +1494,9 @@ const selectTask = async (taskId) => {
   selectedTaskId.value = taskId
 
   try {
-    const res = await axios.get(`/api/tasks/${taskId}`)
+    // 根据当前显示的版本获取对应rubric
+    const version = displayVersion.value === 'V1' ? 1 : 2
+    const res = await axios.get(`/api/tasks/${taskId}?version=${version}`)
     currentTask.value = res.data
   } catch (err) {
     console.error('加载任务详情失败:', err)
@@ -2057,5 +2556,450 @@ onMounted(() => {
 .column-content::-webkit-scrollbar-thumb:hover,
 .task-list::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
+}
+
+/* 版本切换按钮样式 */
+.version-toggle {
+  display: flex;
+  gap: 4px;
+  background: #f0f0f0;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.version-btn {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 3px;
+  transition: all 0.2s;
+  color: #666;
+}
+
+.version-btn:hover {
+  color: #1890ff;
+}
+
+.version-btn.active {
+  background: white;
+  color: #1890ff;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* V1 Rubric 样式 */
+.rubric-item-v1 {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.rubric-item-v1:hover {
+  background: #f0f0f0;
+  border-color: #d9d9d9;
+}
+
+.rubric-item-v1.selected {
+  background: #e6f7ff;
+  border-color: #1890ff;
+}
+
+/* 负分rubric样式 */
+.rubric-item-v1.negative-score {
+  border-color: #ff4d4f;
+  background: #fff2f0;
+}
+
+.rubric-item-v1.negative-score:hover {
+  border-color: #ff7875;
+  background: #fff1f0;
+}
+
+/* 每一行的基础样式 */
+.rubric-v1-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+/* 第一行：标题 */
+.rubric-v1-title-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.rubric-v1-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.rubric-v1-title:hover {
+  background: white;
+}
+
+.rubric-v1-title-input {
+  width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border: 2px solid #1890ff;
+  border-radius: 4px;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 40px;
+  height: auto;
+  overflow: hidden;
+  field-sizing: content;
+}
+
+/* 第二行：checklist */
+.checklist-row {
+  margin-left: 32px;
+}
+
+.rubric-v1-checklist-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.rubric-v1-checklist {
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  background: white;
+  border: 1px solid #e8e8e8;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rubric-v1-checklist:hover {
+  border-color: #d9d9d9;
+}
+
+.rubric-v1-checklist-input {
+  width: 100%;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 2px solid #1890ff;
+  border-radius: 4px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  min-height: 60px;
+  height: auto;
+  overflow: hidden;
+  field-sizing: content;
+}
+
+/* 第三行：维度 + 分数 */
+.meta-row {
+  margin-left: 32px;
+  gap: 24px;
+}
+
+.rubric-v1-dimension-wrapper,
+.rubric-v1-score-wrapper {
+  flex-shrink: 0;
+}
+
+ .rubric-v1-dimension,
+.rubric-v1-score {
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rubric-v1-dimension:hover,
+.rubric-v1-score:hover {
+  background: white;
+}
+
+.meta-label {
+  color: #999;
+  font-size: 12px;
+}
+
+.meta-value {
+  color: #666;
+}
+
+.rubric-v1-dimension-input,
+.rubric-v1-score-input {
+  font-size: 13px;
+  padding: 2px 6px;
+  border: 2px solid #1890ff;
+  border-radius: 4px;
+  outline: none;
+  width: 100px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rubric-v1-score-input {
+  width: 60px;
+  text-align: center;
+}
+
+.rubric-v1-actions {
+  flex-shrink: 0;
+}
+
+.rubric-v1-actions .rubric-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* V2 Rubric 样式 */
+.rubric-item-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.rubric-item-v2:hover {
+  background: #f0f0f0;
+  border-color: #d9d9d9;
+}
+
+.rubric-item-v2.selected {
+  background: #e6f7ff;
+  border-color: #1890ff;
+}
+
+/* 负分rubric样式 */
+.rubric-item-v2.negative-score {
+  border-color: #ff4d4f;
+  background: #fff2f0;
+}
+
+.rubric-item-v2.negative-score:hover {
+  border-color: #ff7875;
+  background: #fff1f0;
+}
+
+.rubric-v2-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.rubric-v2-title-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.rubric-v2-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.rubric-v2-title:hover {
+  background: white;
+}
+
+.rubric-v2-title-input {
+  width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border: 2px solid #1890ff;
+  border-radius: 4px;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 40px;
+  height: auto;
+  overflow: hidden;
+  field-sizing: content;
+}
+
+.rubric-v2-row.meta-row {
+  margin-left: 32px;
+  gap: 24px;
+}
+
+.rubric-v2-dimension-wrapper,
+.rubric-v2-score-wrapper {
+  flex-shrink: 0;
+}
+
+.rubric-v2-dimension,
+.rubric-v2-score {
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rubric-v2-dimension:hover,
+.rubric-v2-score:hover {
+  background: white;
+}
+
+.rubric-v2-dimension-input,
+.rubric-v2-score-input {
+  font-size: 13px;
+  padding: 2px 6px;
+  border: 2px solid #1890ff;
+  border-radius: 4px;
+  outline: none;
+  width: 100px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rubric-v2-score-input {
+  width: 60px;
+  text-align: center;
+}
+
+.rubric-v2-actions {
+  flex-shrink: 0;
+}
+
+.rubric-v2-actions .rubric-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* 编辑操作按钮样式 */
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.edit-actions-inline {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.btn-save,
+.btn-cancel {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.btn-save {
+  background: #52c41a;
+  color: white;
+}
+
+.btn-save:hover {
+  background: #73d13d;
+}
+
+.btn-cancel {
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #d9d9d9;
+}
+
+.btn-cancel:hover {
+  background: #e0e0e0;
+  border-color: #999;
+}
+
+/* 编辑状态下的样式 */
+.rubric-item-v1.editing,
+.rubric-item-v2.editing {
+  border-color: #1890ff;
+  background: #e6f7ff;
+}
+
+.rubric-v1-title.readonly,
+.rubric-v2-title.readonly,
+.rubric-v1-checklist.readonly {
+  color: #999;
+  cursor: default;
+}
+
+/* 标准答案编辑样式 */
+.reference-answer-item.editing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reference-answer-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid #1890ff;
+  border-radius: 4px;
+  font-size: 14px;
+  resize: vertical;
+  min-height: 60px;
+  height: auto;
+  font-family: inherit;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  field-sizing: content;
+}
+
+.reference-answer-input:focus {
+  outline: none;
 }
 </style>

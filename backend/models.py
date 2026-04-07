@@ -44,6 +44,7 @@ class Rubric(BaseModel):
     content: str
     selected: bool
     created_by: Optional[int] = None
+    version: int = 1
 
     class Config:
         from_attributes = True
@@ -84,6 +85,7 @@ class TaskUpdate(BaseModel):
 class RubricCreate(BaseModel):
     task_id: int
     content: str
+    version: int = 1  # 1=V1版本, 2=V2版本
 
 class RubricUpdateContent(BaseModel):
     content: str
@@ -94,6 +96,7 @@ class ReferenceAnswer(BaseModel):
     task_id: int
     content: str
     created_by: Optional[int] = None
+    version: int = 1
 
     class Config:
         from_attributes = True
@@ -101,6 +104,7 @@ class ReferenceAnswer(BaseModel):
 class ReferenceAnswerCreate(BaseModel):
     task_id: int
     content: str
+    version: int = 1  # 1=V1版本, 2=V2版本
 
 class ReferenceAnswerUpdate(BaseModel):
     content: str

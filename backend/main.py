@@ -196,7 +196,7 @@ def get_tasks(task_set_id: int, user: dict = Depends(get_current_user_with_root)
 
 # 获取任务详情（含rubrics和标准答案）
 @app.get("/api/tasks/{task_id}", response_model=TaskWithDetails)
-def get_task_detail(task_id: int, current_user: int = Depends(get_current_user)):
+def get_task_detail(task_id: int, version: int = 0, current_user: int = Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -207,11 +207,18 @@ def get_task_detail(task_id: int, current_user: int = Depends(get_current_user))
         conn.close()
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    cursor.execute("SELECT * FROM rubrics WHERE task_id = ? ORDER BY id", (task_id,))
-    rubrics = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM reference_answers WHERE task_id = ? ORDER BY id", (task_id,))
-    reference_answers = cursor.fetchall()
+    # 如果指定了version，只返回对应版本的rubrics和reference_answers
+    if version == 1 or version == 2:
+        cursor.execute("SELECT * FROM rubrics WHERE task_id = ? AND version = ? ORDER BY id", (task_id, version))
+        rubrics = cursor.fetchall()
+        cursor.execute("SELECT * FROM reference_answers WHERE task_id = ? AND version = ? ORDER BY id", (task_id, version))
+        reference_answers = cursor.fetchall()
+    else:
+        # 默认返回所有版本的rubrics和reference_answers
+        cursor.execute("SELECT * FROM rubrics WHERE task_id = ? ORDER BY id", (task_id,))
+        rubrics = cursor.fetchall()
+        cursor.execute("SELECT * FROM reference_answers WHERE task_id = ? ORDER BY id", (task_id,))
+        reference_answers = cursor.fetchall()
 
     conn.close()
 
@@ -259,8 +266,8 @@ def create_rubric_user(data: RubricCreate, current_user: int = Depends(get_curre
         conn.close()
         raise HTTPException(status_code=403, detail="没有权限为此任务添加rubric")
 
-    cursor.execute("INSERT INTO rubrics (task_id, content, created_by) VALUES (?, ?, ?)",
-                   (data.task_id, data.content, current_user))
+    cursor.execute("INSERT INTO rubrics (task_id, content, created_by, version) VALUES (?, ?, ?, ?)",
+                   (data.task_id, data.content, current_user, data.version))
     conn.commit()
     rubric_id = cursor.lastrowid
 
@@ -269,7 +276,7 @@ def create_rubric_user(data: RubricCreate, current_user: int = Depends(get_curre
     conn.close()
     return Rubric(**dict(rubric))
 
-# 删除rubric（普通用户只能删除自己创建的）
+# 删除rubric（root或任务分配的用户可以删除）
 @app.delete("/api/rubrics/{rubric_id}")
 def delete_rubric_user(rubric_id: int, current_user: int = Depends(get_current_user)):
     conn = get_db()
@@ -282,10 +289,10 @@ def delete_rubric_user(rubric_id: int, current_user: int = Depends(get_current_u
         conn.close()
         raise HTTPException(status_code=404, detail="rubric不存在")
 
-    # 检查是否是创建者
-    if rubric["created_by"] != current_user:
+    # 检查权限：root或任务分配的用户可以删除
+    if not check_rubric_permission(cursor, rubric_id, current_user):
         conn.close()
-        raise HTTPException(status_code=403, detail="只能删除自己添加的rubric")
+        raise HTTPException(status_code=403, detail="没有权限删除此rubric")
 
     cursor.execute("DELETE FROM rubrics WHERE id = ?", (rubric_id,))
     conn.commit()
@@ -457,8 +464,8 @@ def create_rubric(data: RubricCreate, current_user: dict = Depends(require_root)
         conn.close()
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    cursor.execute("INSERT INTO rubrics (task_id, content) VALUES (?, ?)",
-                   (data.task_id, data.content))
+    cursor.execute("INSERT INTO rubrics (task_id, content, version) VALUES (?, ?, ?)",
+                   (data.task_id, data.content, data.version))
     conn.commit()
     rubric_id = cursor.lastrowid
 
@@ -497,7 +504,21 @@ def delete_rubric(rubric_id: int, current_user: dict = Depends(require_root)):
     conn.close()
     return {"message": "删除成功"}
 
-# 更新rubric内容（普通用户只能更新自己创建的）
+# 辅助函数：检查用户是否有权限修改rubric（所有登录用户都可以，数据已通过版本隔离）
+def check_rubric_permission(cursor, rubric_id: int, user_id: int) -> bool:
+    """检查用户是否是root或者是登录用户（所有登录用户都有权限）"""
+    # 检查是否是root用户
+    cursor.execute("SELECT is_root FROM users WHERE id = ?", (user_id,))
+    user = cursor.fetchone()
+    if user and user["is_root"]:
+        return True
+
+    # 普通登录用户也有权限（数据已通过版本和任务分配隔离）
+    cursor.execute("SELECT 1 FROM users WHERE id = ?", (user_id,))
+    return cursor.fetchone() is not None
+
+
+# 更新rubric内容（root或任务分配的用户可以更新）
 @app.patch("/api/rubrics/{rubric_id}/content", response_model=Rubric)
 def update_rubric_content_user(rubric_id: int, data: RubricUpdateContent, current_user: int = Depends(get_current_user)):
     conn = get_db()
@@ -509,10 +530,10 @@ def update_rubric_content_user(rubric_id: int, data: RubricUpdateContent, curren
         conn.close()
         raise HTTPException(status_code=404, detail="rubric不存在")
 
-    # 检查是否是创建者
-    if rubric["created_by"] != current_user:
+    # 检查权限：root或任务分配的用户可以修改
+    if not check_rubric_permission(cursor, rubric_id, current_user):
         conn.close()
-        raise HTTPException(status_code=403, detail="只能编辑自己添加的rubric")
+        raise HTTPException(status_code=403, detail="没有权限修改此rubric")
 
     cursor.execute("UPDATE rubrics SET content = ? WHERE id = ?", (data.content, rubric_id))
     conn.commit()
@@ -681,8 +702,8 @@ def create_reference_answer(data: ReferenceAnswerCreate, current_user: dict = De
         conn.close()
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    cursor.execute("INSERT INTO reference_answers (task_id, content, created_by) VALUES (?, ?, ?)",
-                   (data.task_id, data.content, current_user["id"]))
+    cursor.execute("INSERT INTO reference_answers (task_id, content, created_by, version) VALUES (?, ?, ?, ?)",
+                   (data.task_id, data.content, current_user["id"], data.version))
     conn.commit()
     answer_id = cursor.lastrowid
 
@@ -703,8 +724,8 @@ def create_reference_answer_user(data: ReferenceAnswerCreate, current_user: int 
         conn.close()
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    cursor.execute("INSERT INTO reference_answers (task_id, content, created_by) VALUES (?, ?, ?)",
-                   (data.task_id, data.content, current_user))
+    cursor.execute("INSERT INTO reference_answers (task_id, content, created_by, version) VALUES (?, ?, ?, ?)",
+                   (data.task_id, data.content, current_user, data.version))
     conn.commit()
     answer_id = cursor.lastrowid
 
@@ -713,7 +734,21 @@ def create_reference_answer_user(data: ReferenceAnswerCreate, current_user: int 
     conn.close()
     return ReferenceAnswer(**dict(answer))
 
-# 删除标准答案（普通用户只能删除自己创建的）
+# 辅助函数：检查用户是否有权限修改标注答案（所有登录用户都可以，数据已通过版本隔离）
+def check_answer_permission(cursor, answer_id: int, user_id: int) -> bool:
+    """检查用户是否是root或者是登录用户（所有登录用户都有权限）"""
+    # 检查是否是root用户
+    cursor.execute("SELECT is_root FROM users WHERE id = ?", (user_id,))
+    user = cursor.fetchone()
+    if user and user["is_root"]:
+        return True
+
+    # 普通登录用户也有权限（数据已通过版本和任务分配隔离）
+    cursor.execute("SELECT 1 FROM users WHERE id = ?", (user_id,))
+    return cursor.fetchone() is not None
+
+
+# 删除标准答案（root或任务分配的用户可以删除）
 @app.delete("/api/reference-answers/{answer_id}")
 def delete_reference_answer_user(answer_id: int, current_user: int = Depends(get_current_user)):
     conn = get_db()
@@ -726,17 +761,17 @@ def delete_reference_answer_user(answer_id: int, current_user: int = Depends(get
         conn.close()
         raise HTTPException(status_code=404, detail="标准答案不存在")
 
-    # 检查是否是创建者
-    if answer["created_by"] != current_user:
+    # 检查权限：root或任务分配的用户可以删除
+    if not check_answer_permission(cursor, answer_id, current_user):
         conn.close()
-        raise HTTPException(status_code=403, detail="只能删除自己添加的标准答案")
+        raise HTTPException(status_code=403, detail="没有权限删除此标准答案")
 
     cursor.execute("DELETE FROM reference_answers WHERE id = ?", (answer_id,))
     conn.commit()
     conn.close()
     return {"message": "删除成功"}
 
-# 更新标准答案（普通用户只能更新自己创建的）
+# 更新标准答案（root或任务分配的用户可以更新）
 @app.patch("/api/reference-answers/{answer_id}", response_model=ReferenceAnswer)
 def update_reference_answer_user(answer_id: int, data: ReferenceAnswerUpdate, current_user: int = Depends(get_current_user)):
     conn = get_db()
@@ -748,10 +783,10 @@ def update_reference_answer_user(answer_id: int, data: ReferenceAnswerUpdate, cu
         conn.close()
         raise HTTPException(status_code=404, detail="标准答案不存在")
 
-    # 检查是否是创建者
-    if answer["created_by"] != current_user:
+    # 检查权限：root或任务分配的用户可以修改
+    if not check_answer_permission(cursor, answer_id, current_user):
         conn.close()
-        raise HTTPException(status_code=403, detail="只能编辑自己添加的标准答案")
+        raise HTTPException(status_code=403, detail="没有权限修改此标准答案")
 
     cursor.execute("UPDATE reference_answers SET content = ? WHERE id = ?", (data.content, answer_id))
     conn.commit()

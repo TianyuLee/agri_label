@@ -63,6 +63,7 @@ def init_db():
             selected BOOLEAN DEFAULT 0,
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            version INTEGER DEFAULT 1,
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
             FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
         )
@@ -80,6 +81,16 @@ def init_db():
                        (datetime.now().isoformat(),))
         conn.commit()
         print("添加 created_by 和 created_at 列到 rubrics 表")
+
+    # 检查并添加 version 列（兼容旧数据库）
+    try:
+        cursor.execute("SELECT version FROM rubrics LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE rubrics ADD COLUMN version INTEGER DEFAULT 1")
+        # 为现有记录设置默认版本为1
+        cursor.execute("UPDATE rubrics SET version = 1 WHERE version IS NULL")
+        conn.commit()
+        print("添加 version 列到 rubrics 表")
 
     # 用户任务分配表（记录哪些任务分配给哪些用户）
     cursor.execute("""
@@ -102,10 +113,20 @@ def init_db():
             content TEXT NOT NULL,
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            version INTEGER DEFAULT 1,
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
             FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
         )
     """)
+
+    # 检查并添加 version 列到 reference_answers 表（兼容旧数据库）
+    try:
+        cursor.execute("SELECT version FROM reference_answers LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE reference_answers ADD COLUMN version INTEGER DEFAULT 1")
+        cursor.execute("UPDATE reference_answers SET version = 1 WHERE version IS NULL")
+        conn.commit()
+        print("添加 version 列到 reference_answers 表")
 
     # 插入示例数据
     cursor.execute("SELECT COUNT(*) FROM task_sets")
