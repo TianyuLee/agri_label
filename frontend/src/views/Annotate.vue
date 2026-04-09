@@ -54,6 +54,7 @@
               <div class="task-set-desc">{{ set.description }}</div>
             </div>
             <div v-if="isRoot" class="item-actions" @click.stop>
+              <button class="action-btn export" @click="exportTaskSet(set)" title="导出">⬇</button>
               <button class="action-btn edit" @click="editTaskSet(set)">✎</button>
               <button class="action-btn delete" @click="deleteTaskSet(set.id)">×</button>
             </div>
@@ -336,7 +337,6 @@
               <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 12px;">
 [
   {
-    "user_name": "18222611632",
     "collection_name": "20260407",
     "prompt": "柑橘得了黄龙病怎么治疗",
     "rubrics": [
@@ -346,7 +346,7 @@
     "answers": ["标准答案内容..."]
   }
 ]</pre>
-              <p class="hint-note">注：请使用UTF-8编码的JSON文件。每个任务通过 user_name + collection_name + prompt 定位，rubrics 为对象数组（含 criterion/axis/point），answers 为字符串数组。</p>
+              <p class="hint-note">注：请使用UTF-8编码的JSON文件。每个任务通过 collection_name + prompt 定位，rubrics 为对象数组（含 criterion/axis/point），answers 为字符串数组。</p>
             </div>
           </div>
 
@@ -356,7 +356,6 @@
               <table class="preview-table">
                 <thead>
                   <tr>
-                    <th>手机号</th>
                     <th>任务集合</th>
                     <th>任务名称</th>
                     <th>Rubric</th>
@@ -366,7 +365,6 @@
                 </thead>
                 <tbody>
                   <tr v-for="(item, index) in importPreview.slice(0, 10)" :key="index">
-                    <td>{{ item.phone }}</td>
                     <td>{{ item.taskSetName }}</td>
                     <td>{{ item.taskName }}</td>
                     <td :title="item.rubric">{{ item.rubric.slice(0, 30) }}{{ item.rubric.length > 30 ? '...' : '' }}</td>
@@ -374,7 +372,7 @@
                     <td>{{ item.score }}</td>
                   </tr>
                   <tr v-if="importPreview.length > 10">
-                    <td colspan="6" class="more-rows">... 还有 {{ importPreview.length - 10 }} 条记录</td>
+                    <td colspan="5" class="more-rows">... 还有 {{ importPreview.length - 10 }} 条记录</td>
                   </tr>
                 </tbody>
               </table>
@@ -467,15 +465,20 @@ const parseImportFile = (file) => {
         // 支持数组格式
         const tasks = Array.isArray(jsonData) ? jsonData : [jsonData]
 
-        // 解析 rubrics（去重：根据 user_name + collection_name + prompt + criterion）
+        // 解析 rubrics（去重：根据 collection_name + prompt + criterion）
         const rubricMap = new Map()
-        // 解析 answers（去重：根据 user_name + collection_name + prompt + answer）
+        // 解析 answers（去重：根据 collection_name + prompt + answer）
         const answerMap = new Map()
+        // 存储任务的 completed 状态
+        const taskCompletedMap = new Map()
 
         tasks.forEach(task => {
-          const userName = task.user_name?.trim() || ''
           const collectionName = task.collection_name?.trim() || ''
           const prompt = task.prompt?.trim() || ''
+          const taskKey = `${collectionName}|${prompt}`
+
+          // 保存任务的 completed 状态
+          taskCompletedMap.set(taskKey, task.completed === true)
 
           // 解析 rubrics
           if (task.rubrics && Array.isArray(task.rubrics)) {
@@ -483,15 +486,15 @@ const parseImportFile = (file) => {
               const criterion = rubric.criterion?.trim() || ''
               if (!criterion) return
 
-              const key = `${userName}|${collectionName}|${prompt}|${criterion}`
+              const key = `${collectionName}|${prompt}|${criterion}`
               if (!rubricMap.has(key)) {
                 rubricMap.set(key, {
-                  user_name: userName,
                   collection_name: collectionName,
                   prompt: prompt,
                   criterion: criterion,
                   axis: rubric.axis?.trim() || '',
-                  point: String(rubric.point ?? '0')
+                  point: parseInt(rubric.point) || 0,
+                  selected: rubric.selected === true
                 })
               }
             })
@@ -503,10 +506,9 @@ const parseImportFile = (file) => {
               const answerContent = answer?.trim()
               if (!answerContent) return
 
-              const key = `${userName}|${collectionName}|${prompt}|${answerContent}`
+              const key = `${collectionName}|${prompt}|${answerContent}`
               if (!answerMap.has(key)) {
                 answerMap.set(key, {
-                  user_name: userName,
                   collection_name: collectionName,
                   prompt: prompt,
                   answer: answerContent
@@ -521,7 +523,6 @@ const parseImportFile = (file) => {
 
         // 生成预览记录（用于表格展示）
         const previewRecords = uniqueRubrics.map(r => ({
-          phone: r.user_name,
           taskSetName: r.collection_name,
           taskName: r.prompt,
           rubric: r.criterion,
@@ -532,7 +533,8 @@ const parseImportFile = (file) => {
         resolve({
           rubrics: uniqueRubrics,
           answers: uniqueAnswers,
-          previewRecords: previewRecords
+          previewRecords: previewRecords,
+          taskCompleted: Object.fromEntries(taskCompletedMap)
         })
       } catch (err) {
         reject(new Error('文件解析失败，请确保文件是有效的JSON格式'))
@@ -569,6 +571,7 @@ const importFile = ref(null)
 const importPreview = ref([])
 const importRubrics = ref([])
 const importAnswers = ref([])
+const importTaskCompleted = ref({})
 const importLoading = ref(false)
 const importProgress = ref({ current: 0, total: 0, type: '' })
 
@@ -698,6 +701,7 @@ const closeImportModal = () => {
   importPreview.value = []
   importRubrics.value = []
   importAnswers.value = []
+  importTaskCompleted.value = {}
 }
 
 const handleFileSelect = async (event) => {
@@ -707,10 +711,11 @@ const handleFileSelect = async (event) => {
   importFile.value = file
 
   try {
-    const { rubrics, answers, previewRecords } = await parseImportFile(file)
+    const { rubrics, answers, previewRecords, taskCompleted } = await parseImportFile(file)
     importRubrics.value = rubrics
     importAnswers.value = answers
     importPreview.value = previewRecords
+    importTaskCompleted.value = taskCompleted || {}
 
     if (rubrics.length === 0 && answers.length === 0) {
       alert('未解析到有效数据，请检查文件格式')
@@ -724,6 +729,7 @@ const handleFileSelect = async (event) => {
     importPreview.value = []
     importRubrics.value = []
     importAnswers.value = []
+    importTaskCompleted.value = {}
   }
 }
 
@@ -731,218 +737,81 @@ const confirmImport = async () => {
   if (importRubrics.value.length === 0 && importAnswers.value.length === 0) return
 
   importLoading.value = true
+  importProgress.value = { current: 0, total: 1, type: 'import' }
 
-  // 按 user_name + collection_name + prompt 分组
-  const taskGroups = new Map()
+  try {
+    // 按 collection_name + prompt 分组
+    const taskGroups = new Map()
 
-  // 分组 rubrics
-  importRubrics.value.forEach(rubric => {
-    const key = `${rubric.user_name}|${rubric.collection_name}|${rubric.prompt}`
-    if (!taskGroups.has(key)) {
-      taskGroups.set(key, {
-        user_name: rubric.user_name,
-        collection_name: rubric.collection_name,
-        prompt: rubric.prompt,
-        rubrics: [],
-        answers: []
-      })
-    }
-    taskGroups.get(key).rubrics.push(rubric)
-  })
-
-  // 分组 answers
-  importAnswers.value.forEach(answer => {
-    const key = `${answer.user_name}|${answer.collection_name}|${answer.prompt}`
-    if (!taskGroups.has(key)) {
-      taskGroups.set(key, {
-        user_name: answer.user_name,
-        collection_name: answer.collection_name,
-        prompt: answer.prompt,
-        rubrics: [],
-        answers: []
-      })
-    }
-    taskGroups.get(key).answers.push(answer)
-  })
-
-  const uniqueTasks = Array.from(taskGroups.values())
-  importProgress.value = { current: 0, total: uniqueTasks.length, type: 'task' }
-
-  const errors = []
-  // 缓存：任务集合名称 -> { id, 任务名称 -> 任务ID }
-  const taskSetCache = {}
-  // 缓存：任务ID -> 已存在的rubric标题集合（用于去重）
-  const taskRubricsCache = {}
-  // 缓存：任务ID -> 已存在的标准答案内容集合（用于去重）
-  const taskAnswersCache = {}
-
-  for (let i = 0; i < uniqueTasks.length; i++) {
-    const taskGroup = uniqueTasks[i]
-    importProgress.value.current = i + 1
-
-    try {
-      // 1. 获取或创建任务集合
-      let taskSetId
-      if (taskSetCache[taskGroup.collection_name]) {
-        taskSetId = taskSetCache[taskGroup.collection_name].id
-      } else {
-        let taskSet = taskSets.value.find(ts => ts.name === taskGroup.collection_name)
-        if (!taskSet) {
-          const res = await axios.post('/api/admin/task-sets', {
-            name: taskGroup.collection_name,
-            description: '批量导入创建'
-          })
-          taskSetId = res.data.id
-          // 刷新任务集合列表
-          await loadTaskSets()
-        } else {
-          taskSetId = taskSet.id
-        }
-        // 初始化缓存
-        taskSetCache[taskGroup.collection_name] = { id: taskSetId, tasks: {} }
+    // 分组 rubrics
+    importRubrics.value.forEach(rubric => {
+      const key = `${rubric.collection_name}|${rubric.prompt}`
+      if (!taskGroups.has(key)) {
+        taskGroups.set(key, {
+          collection_name: rubric.collection_name,
+          prompt: rubric.prompt,
+          rubrics: [],
+          answers: []
+        })
       }
+      taskGroups.get(key).rubrics.push(rubric)
+    })
 
-      // 2. 获取或创建任务
-      let taskId
-      const taskCacheKey = taskGroup.prompt
-      if (taskSetCache[taskGroup.collection_name].tasks[taskCacheKey]) {
-        taskId = taskSetCache[taskGroup.collection_name].tasks[taskCacheKey]
-      } else {
-        // 先检查该任务集合下是否已有同名任务
-        let existingTask = null
-        try {
-          const tasksRes = await axios.get(`/api/task-sets/${taskSetId}/tasks`)
-          existingTask = tasksRes.data.find(t => t.query === taskGroup.prompt)
-        } catch (err) {
-          console.log('获取任务列表失败，将创建新任务')
-        }
-
-        if (existingTask) {
-          taskId = existingTask.id
-        } else {
-          const taskRes = await axios.post('/api/admin/tasks', {
-            task_set_id: taskSetId,
-            query: taskGroup.prompt
-          })
-          taskId = taskRes.data.id
-        }
-        taskSetCache[taskGroup.collection_name].tasks[taskCacheKey] = taskId
+    // 分组 answers
+    importAnswers.value.forEach(answer => {
+      const key = `${answer.collection_name}|${answer.prompt}`
+      if (!taskGroups.has(key)) {
+        taskGroups.set(key, {
+          collection_name: answer.collection_name,
+          prompt: answer.prompt,
+          rubrics: [],
+          answers: []
+        })
       }
+      taskGroups.get(key).answers.push(answer)
+    })
 
-      // 3. 导入 Rubrics（如果标题不存在则创建）
-      if (taskGroup.rubrics.length > 0) {
-        // 获取已有rubric标题
-        if (!taskRubricsCache[taskId]) {
-          try {
-            const taskDetailRes = await axios.get(`/api/tasks/${taskId}`)
-            const existingRubrics = taskDetailRes.data.rubrics || []
-            const existingTitles = new Set()
-            existingRubrics.forEach(r => {
-              try {
-                const parsed = JSON.parse(r.content)
-                if (parsed.title) {
-                  existingTitles.add(parsed.title)
-                }
-              } catch (e) {
-                existingTitles.add(r.content)
-              }
-            })
-            taskRubricsCache[taskId] = existingTitles
-          } catch (err) {
-            taskRubricsCache[taskId] = new Set()
-          }
-        }
+    const uniqueTasks = Array.from(taskGroups.values())
 
-        // 创建新的rubrics
-        for (const rubric of taskGroup.rubrics) {
-          const criterion = rubric.criterion?.trim()
-          if (!criterion) continue
-
-          // 检查标题是否已存在
-          if (taskRubricsCache[taskId].has(criterion)) {
-            continue
-          }
-
-          const rubricContent = JSON.stringify({
-            title: criterion,
-            score: parseInt(rubric.point) || 0,
-            dimension: rubric.axis?.trim() || ''
-          })
-
-          await axios.post('/api/admin/rubrics', {
-            task_id: taskId,
-            content: rubricContent,
-            version: 2
-          })
-          taskRubricsCache[taskId].add(criterion)
-        }
+    // 准备批量导入数据（一次性提交所有数据）
+    const batchTasks = uniqueTasks.map(taskGroup => {
+      const taskKey = `${taskGroup.collection_name}|${taskGroup.prompt}`
+      return {
+        collection_name: taskGroup.collection_name,
+        prompt: taskGroup.prompt,
+        completed: importTaskCompleted.value[taskKey] || false,
+        rubrics: taskGroup.rubrics.map(r => ({
+          criterion: r.criterion,
+          axis: r.axis || '',
+          point: parseInt(r.point) || 0,
+          selected: r.selected === true
+        })),
+        answers: taskGroup.answers.map(a => a.answer)
       }
+    })
 
-      // 4. 导入标准答案（如果内容不存在则创建）
-      if (taskGroup.answers.length > 0) {
-        // 获取已有标准答案
-        if (!taskAnswersCache[taskId]) {
-          try {
-            const taskDetailRes = await axios.get(`/api/tasks/${taskId}`)
-            const existingAnswers = taskDetailRes.data.reference_answers || []
-            taskAnswersCache[taskId] = new Set(existingAnswers.map(a => a.content))
-          } catch (err) {
-            taskAnswersCache[taskId] = new Set()
-          }
-        }
+    // 一次性批量导入所有数据
+    const res = await axios.post('/api/admin/batch-import', { tasks: batchTasks })
 
-        // 创建新的标准答案
-        for (const answer of taskGroup.answers) {
-          const content = answer.answer?.trim()
-          if (!content) continue
-
-          // 检查是否已存在
-          if (taskAnswersCache[taskId].has(content)) {
-            continue
-          }
-
-          await axios.post('/api/admin/reference-answers', {
-            task_id: taskId,
-            content: content,
-            version: 2
-          })
-          taskAnswersCache[taskId].add(content)
-        }
-      }
-
-      // 5. 分配给指定用户（根据手机号查找用户ID）
-      const user = allUsers.value.find(u => u.phone === taskGroup.user_name)
-      if (user) {
-        await axios.post(`/api/admin/assign-task?user_id=${user.id}&task_id=${taskId}`)
-      } else {
-        errors.push(`任务 ${taskGroup.prompt}: 未找到手机号 ${taskGroup.user_name} 对应的用户`)
-      }
-    } catch (err) {
-      errors.push(`任务 ${taskGroup.prompt}: ${err.response?.data?.detail || err.message}`)
-    }
-  }
-
-  importLoading.value = false
-
-  if (errors.length > 0) {
-    alert(`导入完成，但有 ${errors.length} 个任务失败：\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n...' : ''}`)
-  } else {
-    const taskCount = uniqueTasks.length
-    const rubricCount = importRubrics.value.length
-    const answerCount = importAnswers.value.length
-    console.log('导入成功，准备关闭弹窗，showImportModal:', showImportModal.value)
+    importLoading.value = false
     showImportModal.value = false
     importFile.value = null
     importPreview.value = []
     importRubrics.value = []
     importAnswers.value = []
-    await nextTick()
-    console.log('弹窗已关闭，showImportModal:', showImportModal.value)
-    alert(`成功导入 ${taskCount} 个任务，${rubricCount} 个 rubric，${answerCount} 个标准答案！`)
+    importTaskCompleted.value = {}
+
+    alert(res.data.message)
+
     // 刷新任务列表
+    await loadTaskSets()
     if (selectedSetId.value) {
       await selectTaskSet(selectedSetId.value)
     }
+  } catch (err) {
+    importLoading.value = false
+    importTaskCompleted.value = {}
+    alert('导入失败: ' + (err.response?.data?.detail || err.message))
   }
 }
 
@@ -1072,6 +941,26 @@ const deleteTaskSet = async (setId) => {
     await loadTaskSets()
   } catch (err) {
     alert('删除失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+const exportTaskSet = async (set) => {
+  try {
+    const res = await axios.get(`/api/admin/task-sets/${set.id}/export`)
+    const exportData = res.data
+
+    // 创建并下载 JSON 文件
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${set.name}_export_${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    alert('导出失败: ' + (err.response?.data?.detail || err.message))
   }
 }
 
@@ -1609,6 +1498,15 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
+}
+
+.action-btn.export {
+  background: #52c41a;
+  color: white;
+}
+
+.action-btn.export:hover {
+  background: #73d13d;
 }
 
 .action-btn.edit {

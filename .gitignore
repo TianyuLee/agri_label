@@ -2,3 +2,4 @@ frontend/node_modules/*
 *.pyc
 backend/annotation.db
 rubric_output.json
+data/*

@@ -13,8 +13,8 @@
           <input
             v-model="phone"
             type="text"
-            placeholder="手机号"
-            maxlength="11"
+            placeholder="账号"
+            maxlength="20"
             @keyup.enter="handleSubmit"
           >
         </div>
@@ -67,18 +67,18 @@ const toggleMode = () => {
 
 const handleSubmit = async () => {
   if (!phone.value || !password.value) {
-    error.value = '请填写手机号和密码'
+    error.value = '请填写账号和密码'
     return
   }
 
-  // root账号特殊处理，普通用户需要11位手机号
-  if (phone.value !== 'root' && !/^\d{11}$/.test(phone.value)) {
-    error.value = '手机号格式不正确'
+  // 验证账号格式：6位以上数字和大小写字母
+  if (!/^[a-zA-Z0-9]{6,}$/.test(phone.value)) {
+    error.value = '账号必须为6位以上的数字和大小写字母'
     return
   }
 
-  // root账号密码不做长度限制，普通用户密码至少6位
-  if (phone.value !== 'root' && password.value.length < 6) {
+  // 验证密码长度
+  if (password.value.length < 6) {
     error.value = '密码长度至少6位'
     return
   }

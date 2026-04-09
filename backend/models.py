@@ -10,6 +10,10 @@ class UserLogin(BaseModel):
     phone: str
     password: str
 
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
 class UserResponse(BaseModel):
     id: int
     phone: str
@@ -86,6 +90,7 @@ class RubricCreate(BaseModel):
     task_id: int
     content: str
     version: int = 1  # 1=V1版本, 2=V2版本
+    selected: bool = False  # 是否勾选
 
 class RubricUpdateContent(BaseModel):
     content: str
@@ -120,3 +125,30 @@ class TaskWithDetails(BaseModel):
 
     class Config:
         from_attributes = True
+
+# 批量导入模型
+class ImportRubric(BaseModel):
+    criterion: str
+    axis: str = ""
+    point: int = 0
+    selected: bool = False
+
+class ImportAnswer(BaseModel):
+    content: str
+
+class ImportTask(BaseModel):
+    collection_name: str
+    prompt: str
+    completed: bool = False
+    rubrics: List[ImportRubric] = []
+    answers: List[str] = []
+
+class BatchImportRequest(BaseModel):
+    tasks: List[ImportTask]
+
+class BatchImportResponse(BaseModel):
+    success: bool
+    message: str
+    task_count: int = 0
+    rubric_count: int = 0
+    answer_count: int = 0
