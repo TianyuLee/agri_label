@@ -21,11 +21,12 @@
             :class="{ 'negative-score': Number(r.score) < 0 }"
           >
             <td>
-              <input
+              <textarea
                 v-model="editRubrics[idx].criterion"
-                class="tree-edit-input"
+                class="tree-edit-input tree-edit-criterion"
                 placeholder="评分标准"
-              />
+                rows="2"
+              ></textarea>
             </td>
             <td>
               <input
@@ -210,6 +211,30 @@
       </div>
     </div>
   </div>
+
+  <!-- 添加节点弹窗 -->
+  <div v-if="showAddModal" class="modal-overlay" @click.self="closeAddModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">{{ addModalTitle }}</h3>
+        <button class="modal-close" @click="closeAddModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <textarea
+          v-model="newNodeClaim"
+          class="modal-input"
+          :placeholder="addModalPlaceholder"
+          rows="4"
+          autofocus
+          @keyup.ctrl.enter="confirmAddNode"
+        ></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-cancel" @click="closeAddModal">取消</button>
+        <button class="modal-btn modal-btn-confirm" @click="confirmAddNode">确定</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -233,6 +258,13 @@ const isLeafExpanded = ref(false)  // 叶子节点表格展开状态，默认折
 const isEditing = ref(false)
 const editClaim = ref('')
 const editRubrics = ref([])
+
+// 添加节点弹窗相关
+const showAddModal = ref(false)
+const addModalTitle = ref('')
+const addModalPlaceholder = ref('')
+const newNodeClaim = ref('')
+const addNodeType = ref('') // 'branch' 或 'leaf'
 
 const hasChildren = computed(() => props.node.nodes && props.node.nodes.length > 0)
 const hasRubrics = computed(() => props.node.rubrics && props.node.rubrics.length > 0)
@@ -301,39 +333,44 @@ const toggleRequired = () => {
 
 // 添加分支子节点
 const addBranchChild = () => {
-  console.log('addBranchChild clicked')
-  const claim = prompt('请输入分支子节点的内容：')
-  console.log('Prompt result:', claim)
-  if (claim && claim.trim()) {
-    console.log('Emitting add-child event')
-    emit('add-child', {
-      parentNode: props.node,
-      childData: {
-        claim: claim.trim(),
-        type: 'branch',
-        rubrics: [],
-        nodes: []
-      }
-    })
-  }
+  addModalTitle.value = '添加分支子节点'
+  addModalPlaceholder.value = '请输入分支子节点的内容...'
+  newNodeClaim.value = ''
+  addNodeType.value = 'branch'
+  showAddModal.value = true
 }
 
 // 添加叶子子节点
 const addLeafChild = () => {
-  const claim = prompt('请输入叶子子节点的内容：')
-  if (claim && claim.trim()) {
+  addModalTitle.value = '添加叶子子节点'
+  addModalPlaceholder.value = '请输入叶子子节点的内容...'
+  newNodeClaim.value = ''
+  addNodeType.value = 'leaf'
+  showAddModal.value = true
+}
+
+// 确认添加节点
+const confirmAddNode = () => {
+  if (newNodeClaim.value && newNodeClaim.value.trim()) {
+    const childData = {
+      claim: newNodeClaim.value.trim(),
+      type: addNodeType.value,
+      rubrics: addNodeType.value === 'leaf' ? [{ criterion: '', score: 0 }] : [],
+      nodes: []
+    }
     emit('add-child', {
       parentNode: props.node,
-      childData: {
-        claim: claim.trim(),
-        type: 'leaf',
-        rubrics: [
-          { criterion: '', score: 0 }
-        ],
-        nodes: []
-      }
+      childData
     })
   }
+  closeAddModal()
+}
+
+// 取消添加节点
+const closeAddModal = () => {
+  showAddModal.value = false
+  newNodeClaim.value = ''
+  addNodeType.value = ''
 }
 
 const updateRubric = (idx, field, value) => {
@@ -606,6 +643,23 @@ const getLevelClass = (lvl) => {
 
 .tree-rubrics-edit-table {
   margin-bottom: 8px;
+  table-layout: fixed;
+}
+
+.tree-rubrics-edit-table th:first-child,
+.tree-rubrics-edit-table td:first-child {
+  width: auto;
+}
+
+.tree-rubrics-edit-table th:nth-child(2),
+.tree-rubrics-edit-table td:nth-child(2) {
+  width: 70px;
+}
+
+.tree-rubrics-edit-table th:nth-child(3),
+.tree-rubrics-edit-table td:nth-child(3) {
+  width: 80px;
+  text-align: center;
 }
 
 .tree-edit-input {
@@ -617,8 +671,14 @@ const getLevelClass = (lvl) => {
 }
 
 .tree-edit-score {
-  width: 80px;
+  width: 60px;
   text-align: center;
+}
+
+.tree-edit-criterion {
+  min-height: 40px;
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .tree-edit-score.negative-score {
@@ -851,5 +911,140 @@ const getLevelClass = (lvl) => {
 .required-checkbox-label.checked .required-pin,
 .required-checkbox-label:has(.required-checkbox:checked) .required-pin {
   opacity: 1;
+}
+
+/* 添加节点弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.15);
+  animation: modalSlideIn 0.3s ease;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #8c8c8c;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.modal-close:hover {
+  background: #f5f5f5;
+  color: #262626;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 100px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: all 0.2s;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 4px rgba(24, 144, 255, 0.1);
+}
+
+.modal-input::placeholder {
+  color: #bfbfbf;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px 24px;
+}
+
+.modal-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.modal-btn-cancel {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.modal-btn-cancel:hover {
+  background: #e8e8e8;
+  color: #262626;
+}
+
+.modal-btn-confirm {
+  background: #1890ff;
+  color: white;
+}
+
+.modal-btn-confirm:hover {
+  background: #40a9ff;
 }
 </style>

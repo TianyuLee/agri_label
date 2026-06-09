@@ -260,7 +260,7 @@ def get_task_detail(task_id: int, version: int = 0, current_user: int = Depends(
         reference_answers = cursor.fetchall()
 
     # 获取 tree 数据
-    tree_data = get_tree_nodes(cursor, task_id, current_user)
+    tree_data = get_tree_nodes(cursor, task_id)
 
     conn.close()
 
@@ -272,7 +272,7 @@ def get_task_detail(task_id: int, version: int = 0, current_user: int = Depends(
 
     return TaskWithDetails(**task_dict)
 
-# 更新rubric选择状态
+# 更新rubric选择状态（全局共享）
 @app.patch("/api/rubrics/{rubric_id}", response_model=Rubric)
 def update_rubric(rubric_id: int, data: RubricUpdate, current_user: int = Depends(get_current_user)):
     conn = get_db()
@@ -391,13 +391,13 @@ def update_tree_node_selection(
             conn.close()
             raise HTTPException(status_code=403, detail="没有权限修改此节点")
 
-    # 更新或插入选择状态
+    # 更新或插入选择状态（全局共享）
     cursor.execute("""
-        INSERT INTO tree_node_selections (node_id, user_id, selected, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(node_id, user_id)
+        INSERT INTO tree_node_selections (node_id, selected, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(node_id)
         DO UPDATE SET selected = ?, updated_at = ?
-    """, (node_id, current_user, data.selected, datetime.now(),
+    """, (node_id, data.selected, datetime.now(),
           data.selected, datetime.now()))
 
     conn.commit()
@@ -446,13 +446,13 @@ def update_tree_node_professional(
             conn.close()
             raise HTTPException(status_code=403, detail="没有权限修改此节点")
 
-    # 更新或插入专业性标记
+    # 更新或插入专业性标记（全局共享）
     cursor.execute("""
-        INSERT INTO tree_node_selections (node_id, user_id, professional, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(node_id, user_id)
+        INSERT INTO tree_node_selections (node_id, professional, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(node_id)
         DO UPDATE SET professional = ?, updated_at = ?
-    """, (node_id, current_user, data.professional, datetime.now(),
+    """, (node_id, data.professional, datetime.now(),
           data.professional, datetime.now()))
 
     conn.commit()
@@ -513,15 +513,15 @@ def update_tree_node_required(
     # 获取所有需要更新的节点ID（包括当前节点及其所有后代）
     all_node_ids = get_all_descendant_ids(cursor, node_id)
 
-    # 更新所有节点的必答标记
+    # 更新所有节点的必答标记（全局共享）
     now = datetime.now()
     for nid in all_node_ids:
         cursor.execute("""
-            INSERT INTO tree_node_selections (node_id, user_id, required, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(node_id, user_id)
+            INSERT INTO tree_node_selections (node_id, required, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(node_id)
             DO UPDATE SET required = ?, updated_at = ?
-        """, (nid, current_user, data.required, now, data.required, now))
+        """, (nid, data.required, now, data.required, now))
 
     conn.commit()
     conn.close()
@@ -578,13 +578,13 @@ def add_tree_node_child(
 
     conn.commit()
 
-    # 返回新节点信息
+    # 返回新节点信息（全局共享状态）
     cursor.execute(
         """SELECT tn.*, COALESCE(tns.selected, 0) as selected
            FROM tree_nodes tn
-           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
            WHERE tn.id = ?""",
-        (current_user, new_node_id)
+        (new_node_id,)
     )
     new_node = cursor.fetchone()
     conn.close()
@@ -637,13 +637,13 @@ def update_tree_node(
         )
         conn.commit()
 
-    # 返回更新后的节点
+    # 返回更新后的节点（全局共享状态）
     cursor.execute(
         """SELECT tn.*, COALESCE(tns.selected, 0) as selected
            FROM tree_nodes tn
-           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
            WHERE tn.id = ?""",
-        (current_user, node_id)
+        (node_id,)
     )
     updated_node = cursor.fetchone()
     conn.close()
@@ -726,13 +726,13 @@ def convert_tree_node_to_branch(
     )
     conn.commit()
 
-    # 返回更新后的节点
+    # 返回更新后的节点（全局共享状态）
     cursor.execute(
         """SELECT tn.*, COALESCE(tns.selected, 0) as selected
            FROM tree_nodes tn
-           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
            WHERE tn.id = ?""",
-        (current_user, node_id)
+        (node_id,)
     )
     updated_node = cursor.fetchone()
     conn.close()
@@ -1375,15 +1375,15 @@ def insert_tree_nodes(cursor, task_id: int, node, parent_id: int = None, order: 
     return node_id
 
 
-def get_tree_nodes(cursor, task_id: int, user_id: int, parent_id: int = None) -> List[dict]:
-    """递归获取 tree 节点"""
+def get_tree_nodes(cursor, task_id: int, parent_id: int = None) -> List[dict]:
+    """递归获取 tree 节点（全局共享状态）"""
     cursor.execute(
         """SELECT tn.*, COALESCE(tns.selected, 0) as selected, COALESCE(tns.professional, 0) as professional, COALESCE(tns.required, 0) as required
            FROM tree_nodes tn
-           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
            WHERE tn.task_id = ? AND tn.parent_id IS ?
            ORDER BY tn.node_order""",
-        (user_id, task_id, parent_id)
+        (task_id, parent_id)
     )
     nodes = cursor.fetchall()
 
@@ -1402,7 +1402,7 @@ def get_tree_nodes(cursor, task_id: int, user_id: int, parent_id: int = None) ->
 
         # 递归获取子节点
         if node["node_type"] == "branch":
-            node_dict["nodes"] = get_tree_nodes(cursor, task_id, user_id, node["id"])
+            node_dict["nodes"] = get_tree_nodes(cursor, task_id, node["id"])
 
         result.append(node_dict)
 

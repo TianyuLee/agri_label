@@ -292,20 +292,17 @@ def init_db():
         )
     """)
 
-    # Tree节点勾选状态表 - 记录用户对每个节点的选择状态
+    # Tree节点勾选状态表 - 全局共享（所有用户看到同一份状态）
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tree_node_selections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            node_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
+            node_id INTEGER NOT NULL UNIQUE,
             selected BOOLEAN DEFAULT 0,
             professional BOOLEAN DEFAULT 0,
             required BOOLEAN DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (node_id) REFERENCES tree_nodes(id) ON DELETE CASCADE,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            UNIQUE(node_id, user_id)
+            FOREIGN KEY (node_id) REFERENCES tree_nodes(id) ON DELETE CASCADE
         )
     """)
 

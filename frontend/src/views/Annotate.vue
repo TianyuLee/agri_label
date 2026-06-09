@@ -230,10 +230,10 @@
               </div>
             </div>
 
-            <!-- 标准答案区域 -->
+            <!-- 参考答案区域 -->
             <div class="reference-answers-section" v-if="currentTask.reference_answers && currentTask.reference_answers.length > 0 || selectedTaskId">
               <div class="section-divider">
-                <span class="divider-text">标准答案</span>
+                <span class="divider-text">参考答案</span>
               </div>
               <div class="reference-answers-list">
                 <div
@@ -247,7 +247,7 @@
                     <textarea
                       v-model="answer.editContent"
                       class="reference-answer-input"
-                      placeholder="请输入标准答案内容"
+                      placeholder="请输入参考答案内容"
                       rows="4"
                     ></textarea>
                     <div class="edit-actions-inline">
@@ -267,7 +267,7 @@
               </div>
               <div v-if="selectedTaskId" class="add-reference-answer-item" @click="showAddReferenceAnswerModal">
                 <span class="add-icon">+</span>
-                <span class="add-text">添加标准答案</span>
+                <span class="add-text">添加参考答案</span>
               </div>
             </div>
 
@@ -366,7 +366,7 @@
       { "criterion": "明确说明柑橘黄龙病目前无特效治愈药", "axis": "", "point": 5 },
       { "criterion": "建议尽快进行田间诊断与实验室检测", "axis": "", "point": 3 }
     ],
-    "answers": ["标准答案内容..."]
+    "answers": ["参考答案内容..."]
   }
 ]</pre>
               <p class="hint-note">注：请使用UTF-8编码的JSON文件。每个任务通过 collection_name + prompt 定位，rubrics 为对象数组（含 criterion/axis/point），answers 为字符串数组。</p>
@@ -374,7 +374,7 @@
           </div>
 
           <div v-if="importRubrics.length > 0 || importAnswers.length > 0 || importTrees.length > 0" class="import-preview">
-            <h4>预览 ({{ importRubrics.length }} 个 rubric, {{ importAnswers.length }} 个标准答案, {{ importTrees.length }} 个树形结构)</h4>
+            <h4>预览 ({{ importRubrics.length }} 个 rubric, {{ importAnswers.length }} 个参考答案, {{ importTrees.length }} 个树形结构)</h4>
             <div class="preview-table-container">
               <table class="preview-table">
                 <thead>
@@ -585,7 +585,7 @@
 
           <!-- Answers对比 -->
           <div class="diff-section">
-            <h4>标准答案对比</h4>
+            <h4>参考答案对比</h4>
             <div class="diff-summary">
               原始: {{ currentDiff?.answers?.original_count }}条，当前: {{ currentDiff?.answers?.current_count }}条
             </div>
@@ -1487,7 +1487,7 @@ const buildRubricV2Content = (data) => {
   })
 }
 
-// ==================== 标准答案行内编辑 ====================
+// ==================== 参考答案行内编辑 ====================
 const startEditReferenceAnswer = (answer) => {
   // 先取消其他所有答案的编辑状态
   if (currentTask.value && currentTask.value.reference_answers) {
@@ -1519,10 +1519,10 @@ const saveReferenceAnswerInline = async (answer) => {
   answer.isEditing = false
 }
 
-// ==================== 标准答案管理 ====================
+// ==================== 参考答案管理 ====================
 const showAddReferenceAnswerModal = () => {
-  openModal('添加标准答案', [
-    { label: '内容', type: 'textarea', value: '', placeholder: '请输入标准答案内容' }
+  openModal('添加参考答案', [
+    { label: '内容', type: 'textarea', value: '', placeholder: '请输入参考答案内容' }
   ], async (fields) => {
     try {
       const url = isRoot.value ? '/api/admin/reference-answers' : '/api/reference-answers'
@@ -1539,7 +1539,7 @@ const showAddReferenceAnswerModal = () => {
 }
 
 const deleteReferenceAnswer = async (answerId) => {
-  if (!confirm('确定要删除这个标准答案吗？')) return
+  if (!confirm('确定要删除这个参考答案吗？')) return
   try {
     const url = isRoot.value ? `/api/admin/reference-answers/${answerId}` : `/api/reference-answers/${answerId}`
     await axios.delete(url)
@@ -2652,7 +2652,7 @@ onMounted(() => {
   color: #666;
 }
 
-/* 标准答案样式 */
+/* 参考答案样式 */
 .reference-answers-section {
   margin-top: 24px;
 }
@@ -3132,7 +3132,7 @@ onMounted(() => {
   cursor: default;
 }
 
-/* 标准答案编辑样式 */
+/* 参考答案编辑样式 */
 .reference-answer-item.editing {
   display: flex;
   flex-direction: column;
