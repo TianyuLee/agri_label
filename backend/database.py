@@ -243,6 +243,87 @@ def init_db():
                            (ROOT_ACCOUNT, hashed_root_pw))
             print(f"创建 root 账号成功: {ROOT_ACCOUNT}，密码: {ROOT_PASSWORD}")
 
+    # 导入历史表 - 保存每次导入的原始数据
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS import_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_set_id INTEGER NOT NULL,
+            imported_by INTEGER,
+            import_batch_id TEXT NOT NULL,
+            original_data TEXT NOT NULL,
+            import_type TEXT DEFAULT 'full',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (task_set_id) REFERENCES task_sets(id) ON DELETE CASCADE,
+            FOREIGN KEY (imported_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+
+    # Rubric历史表 - 记录每次变更
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rubric_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rubric_id INTEGER NOT NULL,
+            task_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            selected BOOLEAN DEFAULT 0,
+            version INTEGER DEFAULT 1,
+            changed_by INTEGER,
+            change_type TEXT DEFAULT 'update',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (rubric_id) REFERENCES rubrics(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+
+    # Tree节点表 - 存储树形结构
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tree_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            claim TEXT NOT NULL,
+            node_type TEXT NOT NULL,  -- 'branch' 或 'leaf'
+            parent_id INTEGER,  -- NULL 表示根节点
+            rubrics TEXT,  -- JSON 格式，只有 leaf 节点有
+            node_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_id) REFERENCES tree_nodes(id) ON DELETE CASCADE
+        )
+    """)
+
+    # Tree节点勾选状态表 - 记录用户对每个节点的选择状态
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tree_node_selections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            selected BOOLEAN DEFAULT 0,
+            professional BOOLEAN DEFAULT 0,
+            required BOOLEAN DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (node_id) REFERENCES tree_nodes(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(node_id, user_id)
+        )
+    """)
+
+    # 任务历史表 - 记录任务变更
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            completed BOOLEAN DEFAULT 0,
+            changed_by INTEGER,
+            change_type TEXT DEFAULT 'update',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
 

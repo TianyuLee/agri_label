@@ -114,6 +114,22 @@ class ReferenceAnswerCreate(BaseModel):
 class ReferenceAnswerUpdate(BaseModel):
     content: str
 
+# Tree 相关模型
+class TreeRubric(BaseModel):
+    criterion: str
+    score: int = 0
+
+class TreeNodeData(BaseModel):
+    """返回给前端的树节点数据"""
+    id: int
+    claim: str
+    type: str  # 'branch' 或 'leaf'
+    rubrics: List[TreeRubric] = []
+    nodes: List['TreeNodeData'] = []
+    selected: bool = False  # 用户选择状态
+    professional: bool = False  # 专业性标记
+    required: bool = False  # 必答标记
+
 class TaskWithDetails(BaseModel):
     id: int
     task_set_id: int
@@ -122,9 +138,20 @@ class TaskWithDetails(BaseModel):
     completed_at: Optional[datetime]
     rubrics: List[Rubric]
     reference_answers: List[ReferenceAnswer]
+    tree: Optional[TreeNodeData] = None  # 树形结构
 
     class Config:
         from_attributes = True
+
+class TreeNode(BaseModel):
+    claim: str
+    type: str  # 'branch' 或 'leaf'
+    rubrics: List[TreeRubric] = []
+    nodes: List['TreeNode'] = []  # 子节点
+
+class ImportTree(BaseModel):
+    reason: str = ""
+    tree: Optional[TreeNode] = None
 
 # 批量导入模型
 class ImportRubric(BaseModel):
@@ -142,6 +169,7 @@ class ImportTask(BaseModel):
     completed: bool = False
     rubrics: List[ImportRubric] = []
     answers: List[str] = []
+    tree: Optional[ImportTree] = None
 
 class BatchImportRequest(BaseModel):
     tasks: List[ImportTask]
@@ -152,3 +180,68 @@ class BatchImportResponse(BaseModel):
     task_count: int = 0
     rubric_count: int = 0
     answer_count: int = 0
+
+# 历史记录模型
+class ImportHistory(BaseModel):
+    id: int
+    task_set_id: int
+    imported_by: Optional[int] = None
+    import_batch_id: str
+    import_type: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class RubricHistory(BaseModel):
+    id: int
+    rubric_id: int
+    task_id: int
+    content: str
+    selected: bool
+    version: int
+    change_type: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class TaskHistory(BaseModel):
+    id: int
+    task_id: int
+    query: str
+    completed: bool
+    change_type: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# Diff对比模型
+class RubricDiff(BaseModel):
+    criterion: str
+    old_point: Optional[int] = None
+    new_point: Optional[int] = None
+    old_selected: Optional[bool] = None
+    new_selected: Optional[bool] = None
+    old_axis: Optional[str] = None
+    new_axis: Optional[str] = None
+    change_type: str  # 'added', 'removed', 'modified'
+
+class TaskDiff(BaseModel):
+    prompt: str
+    changes: List[RubricDiff]
+    answers_changed: bool = False
+
+
+# Tree 节点选择更新模型
+class TreeNodeSelectionUpdate(BaseModel):
+    selected: bool
+
+# Tree 节点专业性更新模型
+class TreeNodeProfessionalUpdate(BaseModel):
+    professional: bool
+
+# Tree 节点必答更新模型
+class TreeNodeRequiredUpdate(BaseModel):
+    required: bool

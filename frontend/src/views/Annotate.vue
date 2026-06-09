@@ -19,19 +19,23 @@
             </option>
           </select>
           <button v-if="viewMode === 'user'" class="manage-btn" @click="showTaskAssignModal">
-            管理任务分配
+            管理集合分配
           </button>
         </div>
       </div>
       <div class="header-user">
         <span>{{ phone }}</span>
+        <button class="change-password-btn" @click="showChangePasswordModal = true">修改密码</button>
         <button class="logout-btn" @click="logout">退出</button>
       </div>
     </header>
 
     <div class="main-content">
       <!-- 第一列：任务集合 -->
-      <div class="column column-1">
+      <div class="column column-1" :class="{ collapsed: isTaskSetCollapsed }">
+        <div class="collapse-toggle" @click="toggleTaskSetColumn" :title="isTaskSetCollapsed ? '展开' : '收起'">
+          <span class="collapse-arrow" :class="{ collapsed: isTaskSetCollapsed }">◀</span>
+        </div>
         <div class="column-header">
           <span>任务集合</span>
           <div v-if="isRoot" class="header-actions">
@@ -54,9 +58,9 @@
               <div class="task-set-desc">{{ set.description }}</div>
             </div>
             <div v-if="isRoot" class="item-actions" @click.stop>
-              <button class="action-btn export" @click="exportTaskSet(set)" title="导出">⬇</button>
               <button class="action-btn edit" @click="editTaskSet(set)">✎</button>
               <button class="action-btn delete" @click="deleteTaskSet(set.id)">×</button>
+              <button class="action-btn export" @click="exportTaskSet(set)" title="导出">⬇</button>
             </div>
           </div>
         </div>
@@ -76,7 +80,7 @@
             :class="{ active: selectedTaskId === task.id, completed: task.completed }"
             @click="selectTask(task.id)"
           >
-            <div class="task-query">{{ task.query }}</div>
+            <div class="task-query" :title="task.query">{{ task.query }}</div>
             <div class="task-actions">
               <div v-if="task.completed" class="completed-badge">已完成</div>
               <div v-if="isRoot" class="item-actions" @click.stop>
@@ -97,7 +101,8 @@
           <div v-if="currentTask" class="annotation-panel">
             <div class="query-title">{{ currentTask.query }}</div>
 
-            <div class="rubrics-list">
+            <!-- 普通 rubrics 列表 - 只有在没有 tree 时才显示 -->
+            <div v-if="!currentTask.tree" class="rubrics-list">
               <div
                 v-for="rubric in currentTask.rubrics"
                 :key="rubric.id"
@@ -204,6 +209,24 @@
               <div v-if="selectedTaskId" class="add-rubric-item" @click="showAddRubricModal">
                 <span class="add-icon">+</span>
                 <span class="add-text">添加Rubric</span>
+              </div>
+            </div>
+
+            <!-- Tree 评分区域 -->
+            <div class="tree-section" v-if="currentTask.tree">
+              <div class="section-title">树形评分标准</div>
+              <div class="tree-container">
+                <TreeNode
+                  v-if="currentTask.tree"
+                  :node="currentTask.tree"
+                  :level="0"
+                  @toggle="toggleTreeNode"
+                  @update="updateTreeNode"
+                  @delete="deleteTreeNode"
+                  @add-child="addTreeNodeChild"
+                  @update-professional="updateTreeNodeProfessional"
+                  @update-required="updateTreeNodeRequired"
+                />
               </div>
             </div>
 
@@ -350,8 +373,8 @@
             </div>
           </div>
 
-          <div v-if="importRubrics.length > 0 || importAnswers.length > 0" class="import-preview">
-            <h4>预览 ({{ importRubrics.length }} 个 rubric, {{ importAnswers.length }} 个标准答案)</h4>
+          <div v-if="importRubrics.length > 0 || importAnswers.length > 0 || importTrees.length > 0" class="import-preview">
+            <h4>预览 ({{ importRubrics.length }} 个 rubric, {{ importAnswers.length }} 个标准答案, {{ importTrees.length }} 个树形结构)</h4>
             <div class="preview-table-container">
               <table class="preview-table">
                 <thead>
@@ -391,7 +414,7 @@
           <button
             class="btn-confirm"
             @click="confirmImport"
-            :disabled="(importRubrics.length === 0 && importAnswers.length === 0) || importLoading"
+            :disabled="(importRubrics.length === 0 && importAnswers.length === 0 && importTrees.length === 0) || importLoading"
           >
             {{ importLoading ? '导入中...' : '确认导入' }}
           </button>
@@ -399,31 +422,35 @@
       </div>
     </div>
 
-    <!-- 任务分配管理弹窗 -->
+    <!-- 任务集合分配管理弹窗 -->
     <div v-if="showAssignModal" class="modal-overlay" @click="closeAssignModal">
       <div class="modal-content large" @click.stop>
-        <h3>任务分配管理 - {{ getSelectedUserName() }}</h3>
+        <h3>任务集合分配管理 - {{ getSelectedUserName() }}</h3>
         <div class="assign-body">
           <div class="assign-section">
-            <h4>已分配的任务</h4>
+            <h4>已分配的任务集合</h4>
             <div class="task-list">
-              <div v-for="task in assignedTasks" :key="task.id" class="assign-task-item">
-                <span class="task-set-tag">{{ task.task_set_name }}</span>
-                <span class="task-query">{{ task.query }}</span>
-                <button class="btn-remove" @click="unassignTask(task.id)">移除</button>
+              <div v-for="taskSet in assignedTaskSets" :key="taskSet.id" class="assign-taskset-item">
+                <div class="taskset-info">
+                  <span class="taskset-name">{{ taskSet.name }}</span>
+                  <span v-if="taskSet.description" class="taskset-desc">{{ taskSet.description }}</span>
+                </div>
+                <button class="btn-remove" @click="unassignTaskSet(taskSet.id)">移除</button>
               </div>
-              <div v-if="assignedTasks.length === 0" class="empty-hint">暂无分配任务</div>
+              <div v-if="assignedTaskSets.length === 0" class="empty-hint">暂无分配任务集合</div>
             </div>
           </div>
           <div class="assign-section">
-            <h4>未分配的任务</h4>
+            <h4>未分配的任务集合</h4>
             <div class="task-list">
-              <div v-for="task in unassignedTasks" :key="task.id" class="assign-task-item">
-                <span class="task-set-tag">{{ task.task_set_name }}</span>
-                <span class="task-query">{{ task.query }}</span>
-                <button class="btn-add" @click="assignTask(task.id)">分配</button>
+              <div v-for="taskSet in unassignedTaskSets" :key="taskSet.id" class="assign-taskset-item">
+                <div class="taskset-info">
+                  <span class="taskset-name">{{ taskSet.name }}</span>
+                  <span v-if="taskSet.description" class="taskset-desc">{{ taskSet.description }}</span>
+                </div>
+                <button class="btn-add" @click="assignTaskSet(taskSet.id)">分配</button>
               </div>
-              <div v-if="unassignedTasks.length === 0" class="empty-hint">所有任务都已分配</div>
+              <div v-if="unassignedTaskSets.length === 0" class="empty-hint">所有任务集合都已分配</div>
             </div>
           </div>
         </div>
@@ -432,13 +459,163 @@
         </div>
       </div>
     </div>
+
+    <!-- 修改密码弹窗 -->
+    <div v-if="showChangePasswordModal" class="modal-overlay" @click.self="closeChangePasswordModal">
+      <div class="modal change-password-modal">
+        <div class="modal-header">
+          <h3>修改密码</h3>
+          <button class="close-btn" @click="closeChangePasswordModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>旧密码</label>
+            <input
+              v-model="passwordForm.oldPassword"
+              type="password"
+              placeholder="请输入旧密码"
+            >
+          </div>
+          <div class="form-group">
+            <label>新密码</label>
+            <input
+              v-model="passwordForm.newPassword"
+              type="password"
+              placeholder="请输入新密码（至少6位）"
+            >
+          </div>
+          <div class="form-group">
+            <label>确认新密码</label>
+            <input
+              v-model="passwordForm.confirmPassword"
+              type="password"
+              placeholder="请再次输入新密码"
+            >
+          </div>
+          <div v-if="passwordError" class="error-message">{{ passwordError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeChangePasswordModal">取消</button>
+          <button class="btn-confirm" @click="changePassword" :disabled="passwordLoading">
+            {{ passwordLoading ? '修改中...' : '确认修改' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导入历史弹窗 -->
+    <div v-if="showHistoryModal" class="modal-overlay" @click.self="closeHistoryModal">
+      <div class="modal-content large">
+        <div class="modal-header">
+          <h3>导入历史 - {{ currentHistoryTaskSet?.name }}</h3>
+          <button class="close-btn" @click="closeHistoryModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="importBatches.length === 0" class="empty-hint">暂无导入记录</div>
+          <div v-else class="history-list">
+            <div v-for="batch in importBatches" :key="batch.batch_id" class="history-item">
+              <div class="history-info">
+                <div class="history-time">{{ new Date(batch.import_time).toLocaleString() }}</div>
+                <div class="history-meta">
+                  <span class="history-user">导入者: {{ batch.imported_by_name }}</span>
+                  <span class="history-count">任务数: {{ batch.task_count }}</span>
+                </div>
+              </div>
+              <button class="btn-view-diff" @click="viewBatchDiff(batch)">查看变更</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeHistoryModal">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diff对比弹窗 -->
+    <div v-if="showDiffModal" class="modal-overlay" @click.self="closeDiffModal">
+      <div class="modal-content large fullscreen-modal">
+        <div class="modal-header">
+          <h3>变更对比 - {{ currentDiff?.prompt }}</h3>
+          <button class="close-btn" @click="closeDiffModal">×</button>
+        </div>
+        <div class="modal-body diff-body">
+          <div v-if="!currentDiff?.task_exists" class="diff-warning">
+            ⚠️ 该任务已被删除，以下显示的是导入时的原始数据
+          </div>
+
+          <!-- Rubrics对比 -->
+          <div class="diff-section">
+            <h4>Rubrics 对比</h4>
+            <div v-if="currentDiff?.rubrics?.length === 0" class="empty-hint">暂无 Rubric 数据</div>
+            <div v-else class="diff-list">
+              <div v-for="(rubric, idx) in currentDiff?.rubrics" :key="idx" class="diff-item" :class="rubric.change_type">
+                <div class="diff-header">
+                  <span class="diff-badge" :class="rubric.change_type">{{ getChangeTypeText(rubric.change_type) }}</span>
+                  <span class="diff-title">{{ rubric.criterion }}</span>
+                </div>
+                <div class="diff-content">
+                  <div v-if="rubric.change_type === 'removed'" class="diff-old">
+                    <div class="diff-label">原始值:</div>
+                    <div class="diff-value">分数: {{ rubric.old?.point }}, 维度: {{ rubric.old?.axis || '-' }}, 勾选: {{ rubric.old?.selected ? '是' : '否' }}</div>
+                  </div>
+                  <div v-else-if="rubric.change_type === 'added'" class="diff-new">
+                    <div class="diff-label">当前值:</div>
+                    <div class="diff-value">分数: {{ rubric.new?.point }}, 维度: {{ rubric.new?.axis || '-' }}, 勾选: {{ rubric.new?.selected ? '是' : '否' }}</div>
+                  </div>
+                  <div v-else-if="rubric.change_type === 'modified'" class="diff-modified">
+                    <div class="diff-old">
+                      <div class="diff-label">原始值:</div>
+                      <div class="diff-value">
+                        分数: {{ rubric.old?.point }}
+                        <span v-if="rubric.old?.point !== rubric.new?.point" class="changed">→ {{ rubric.new?.point }}</span>
+                        , 维度: {{ rubric.old?.axis || '-' }}
+                        <span v-if="rubric.old?.axis !== rubric.new?.axis" class="changed">→ {{ rubric.new?.axis || '-' }}</span>
+                        , 勾选: {{ rubric.old?.selected ? '是' : '否' }}
+                        <span v-if="rubric.old?.selected !== rubric.new?.selected" class="changed">→ {{ rubric.new?.selected ? '是' : '否' }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="diff-unchanged">
+                    <div class="diff-value">分数: {{ rubric.old?.point }}, 维度: {{ rubric.old?.axis || '-' }}, 勾选: {{ rubric.old?.selected ? '是' : '否' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Answers对比 -->
+          <div class="diff-section">
+            <h4>标准答案对比</h4>
+            <div class="diff-summary">
+              原始: {{ currentDiff?.answers?.original_count }}条，当前: {{ currentDiff?.answers?.current_count }}条
+            </div>
+            <div v-if="currentDiff?.answers?.removed?.length > 0" class="diff-subsection">
+              <h5 class="diff-subtitle removed">已删除 ({{ currentDiff?.answers?.removed?.length }})</h5>
+              <div v-for="(answer, idx) in currentDiff?.answers?.removed" :key="'removed-'+idx" class="diff-answer-item removed">
+                {{ answer.slice(0, 100) }}{{ answer.length > 100 ? '...' : '' }}
+              </div>
+            </div>
+            <div v-if="currentDiff?.answers?.added?.length > 0" class="diff-subsection">
+              <h5 class="diff-subtitle added">新增 ({{ currentDiff?.answers?.added?.length }})</h5>
+              <div v-for="(answer, idx) in currentDiff?.answers?.added" :key="'added-'+idx" class="diff-answer-item added">
+                {{ answer.slice(0, 100) }}{{ answer.length > 100 ? '...' : '' }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="closeDiffModal">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed, h, defineComponent, resolveComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import TreeNode from '../components/TreeNode.vue'
 
 // JSON 解析函数（支持 rubric_output.json 格式）
 const parseImportFile = (file) => {
@@ -471,6 +648,8 @@ const parseImportFile = (file) => {
         const answerMap = new Map()
         // 存储任务的 completed 状态
         const taskCompletedMap = new Map()
+        // 存储任务的 tree 数据
+        const taskTreeMap = new Map()
 
         tasks.forEach(task => {
           const collectionName = task.collection_name?.trim() || ''
@@ -479,6 +658,15 @@ const parseImportFile = (file) => {
 
           // 保存任务的 completed 状态
           taskCompletedMap.set(taskKey, task.completed === true)
+
+          // 保存任务的 tree 数据
+          if (task.tree && task.tree.tree) {
+            taskTreeMap.set(taskKey, {
+              collection_name: collectionName,
+              prompt: prompt,
+              tree: task.tree
+            })
+          }
 
           // 解析 rubrics
           if (task.rubrics && Array.isArray(task.rubrics)) {
@@ -534,7 +722,8 @@ const parseImportFile = (file) => {
           rubrics: uniqueRubrics,
           answers: uniqueAnswers,
           previewRecords: previewRecords,
-          taskCompleted: Object.fromEntries(taskCompletedMap)
+          taskCompleted: Object.fromEntries(taskCompletedMap),
+          trees: Array.from(taskTreeMap.values())
         })
       } catch (err) {
         reject(new Error('文件解析失败，请确保文件是有效的JSON格式'))
@@ -555,6 +744,12 @@ const currentTask = ref(null)
 const selectedSetId = ref(null)
 const selectedTaskId = ref(null)
 
+// 任务集合栏折叠状态
+const isTaskSetCollapsed = ref(false)
+const toggleTaskSetColumn = () => {
+  isTaskSetCollapsed.value = !isTaskSetCollapsed.value
+}
+
 // Root 用户相关
 const viewMode = ref('self') // 'self' 或 'user'
 const allUsers = ref([])
@@ -562,8 +757,8 @@ const selectedUserId = ref(null)
 
 // 任务分配管理
 const showAssignModal = ref(false)
-const assignedTasks = ref([])
-const unassignedTasks = ref([])
+const assignedTaskSets = ref([])
+const unassignedTaskSets = ref([])
 
 // 批量导入
 const showImportModal = ref(false)
@@ -572,8 +767,27 @@ const importPreview = ref([])
 const importRubrics = ref([])
 const importAnswers = ref([])
 const importTaskCompleted = ref({})
+const importTrees = ref([])
 const importLoading = ref(false)
 const importProgress = ref({ current: 0, total: 0, type: '' })
+
+// 修改密码
+const showChangePasswordModal = ref(false)
+const passwordForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+const passwordError = ref('')
+const passwordLoading = ref(false)
+
+// 导入历史相关
+const showHistoryModal = ref(false)
+const showDiffModal = ref(false)
+const currentHistoryTaskSet = ref(null)
+const importBatches = ref([])
+const currentDiff = ref(null)
+const currentBatchHistory = ref([])
 
 // Modal 相关
 const showModal = ref(false)
@@ -598,6 +812,49 @@ const logout = () => {
   localStorage.removeItem('phone')
   localStorage.removeItem('isRoot')
   router.push('/login')
+}
+
+// 修改密码
+const closeChangePasswordModal = () => {
+  showChangePasswordModal.value = false
+  passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+  passwordError.value = ''
+}
+
+const changePassword = async () => {
+  const { oldPassword, newPassword, confirmPassword } = passwordForm.value
+
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    passwordError.value = '请填写所有字段'
+    return
+  }
+
+  if (newPassword.length < 6) {
+    passwordError.value = '新密码至少6位'
+    return
+  }
+
+  if (newPassword !== confirmPassword) {
+    passwordError.value = '两次输入的新密码不一致'
+    return
+  }
+
+  passwordLoading.value = true
+  passwordError.value = ''
+
+  try {
+    await axios.post('/api/change-password', {
+      old_password: oldPassword,
+      new_password: newPassword
+    })
+    passwordLoading.value = false
+    alert('密码修改成功，请使用新密码重新登录')
+    closeChangePasswordModal()
+    logout()
+  } catch (err) {
+    passwordLoading.value = false
+    passwordError.value = err.response?.data?.detail || '密码修改失败'
+  }
 }
 
 // 获取选中的用户名
@@ -674,7 +931,7 @@ const showTaskAssignModal = async () => {
     return
   }
   showAssignModal.value = true
-  await loadAssignTasks()
+  await loadAssignTaskSets()
 }
 
 const closeAssignModal = () => {
@@ -702,6 +959,7 @@ const closeImportModal = () => {
   importRubrics.value = []
   importAnswers.value = []
   importTaskCompleted.value = {}
+  importTrees.value = []
 }
 
 const handleFileSelect = async (event) => {
@@ -711,13 +969,14 @@ const handleFileSelect = async (event) => {
   importFile.value = file
 
   try {
-    const { rubrics, answers, previewRecords, taskCompleted } = await parseImportFile(file)
+    const { rubrics, answers, previewRecords, taskCompleted, trees } = await parseImportFile(file)
     importRubrics.value = rubrics
     importAnswers.value = answers
     importPreview.value = previewRecords
     importTaskCompleted.value = taskCompleted || {}
+    importTrees.value = trees || []
 
-    if (rubrics.length === 0 && answers.length === 0) {
+    if (rubrics.length === 0 && answers.length === 0 && trees.length === 0) {
       alert('未解析到有效数据，请检查文件格式')
     }
   } catch (err) {
@@ -730,11 +989,12 @@ const handleFileSelect = async (event) => {
     importRubrics.value = []
     importAnswers.value = []
     importTaskCompleted.value = {}
+    importTrees.value = []
   }
 }
 
 const confirmImport = async () => {
-  if (importRubrics.value.length === 0 && importAnswers.value.length === 0) return
+  if (importRubrics.value.length === 0 && importAnswers.value.length === 0 && importTrees.value.length === 0) return
 
   importLoading.value = true
   importProgress.value = { current: 0, total: 1, type: 'import' }
@@ -751,7 +1011,8 @@ const confirmImport = async () => {
           collection_name: rubric.collection_name,
           prompt: rubric.prompt,
           rubrics: [],
-          answers: []
+          answers: [],
+          tree: null
         })
       }
       taskGroups.get(key).rubrics.push(rubric)
@@ -765,10 +1026,26 @@ const confirmImport = async () => {
           collection_name: answer.collection_name,
           prompt: answer.prompt,
           rubrics: [],
-          answers: []
+          answers: [],
+          tree: null
         })
       }
       taskGroups.get(key).answers.push(answer)
+    })
+
+    // 分组 trees
+    importTrees.value.forEach(treeData => {
+      const key = `${treeData.collection_name}|${treeData.prompt}`
+      if (!taskGroups.has(key)) {
+        taskGroups.set(key, {
+          collection_name: treeData.collection_name,
+          prompt: treeData.prompt,
+          rubrics: [],
+          answers: [],
+          tree: null
+        })
+      }
+      taskGroups.get(key).tree = treeData.tree
     })
 
     const uniqueTasks = Array.from(taskGroups.values())
@@ -776,7 +1053,7 @@ const confirmImport = async () => {
     // 准备批量导入数据（一次性提交所有数据）
     const batchTasks = uniqueTasks.map(taskGroup => {
       const taskKey = `${taskGroup.collection_name}|${taskGroup.prompt}`
-      return {
+      const taskData = {
         collection_name: taskGroup.collection_name,
         prompt: taskGroup.prompt,
         completed: importTaskCompleted.value[taskKey] || false,
@@ -788,6 +1065,11 @@ const confirmImport = async () => {
         })),
         answers: taskGroup.answers.map(a => a.answer)
       }
+      // 如果有 tree 数据，添加到任务中
+      if (taskGroup.tree) {
+        taskData.tree = taskGroup.tree
+      }
+      return taskData
     })
 
     // 一次性批量导入所有数据
@@ -800,6 +1082,7 @@ const confirmImport = async () => {
     importRubrics.value = []
     importAnswers.value = []
     importTaskCompleted.value = {}
+    importTrees.value = []
 
     alert(res.data.message)
 
@@ -811,49 +1094,51 @@ const confirmImport = async () => {
   } catch (err) {
     importLoading.value = false
     importTaskCompleted.value = {}
+    importTrees.value = []
     alert('导入失败: ' + (err.response?.data?.detail || err.message))
   }
 }
 
-const loadAssignTasks = async () => {
+const loadAssignTaskSets = async () => {
   try {
     const [assignedRes, unassignedRes] = await Promise.all([
-      axios.get(`/api/admin/users/${selectedUserId.value}/assigned-tasks`),
-      axios.get(`/api/admin/users/${selectedUserId.value}/unassigned-tasks`)
+      axios.get(`/api/admin/users/${selectedUserId.value}/assigned-task-sets`),
+      axios.get(`/api/admin/users/${selectedUserId.value}/unassigned-task-sets`)
     ])
-    assignedTasks.value = assignedRes.data
-    unassignedTasks.value = unassignedRes.data
+    assignedTaskSets.value = assignedRes.data
+    unassignedTaskSets.value = unassignedRes.data
   } catch (err) {
-    console.error('加载任务分配数据失败:', err)
+    console.error('加载任务集合分配数据失败:', err)
   }
 }
 
-const assignTask = async (taskId) => {
+const assignTaskSet = async (taskSetId) => {
   try {
-    await axios.post(`/api/admin/assign-task?user_id=${selectedUserId.value}&task_id=${taskId}`)
-    await loadAssignTasks()
+    await axios.post(`/api/admin/assign-task-set?user_id=${selectedUserId.value}&task_set_id=${taskSetId}`)
+    await loadAssignTaskSets()
     // 刷新任务列表
     if (selectedSetId.value) {
-      await loadUserTasks(selectedUserId.value, selectedSetId.value)
+      await loadUserTaskSets(selectedUserId.value)
     }
   } catch (err) {
     alert('分配失败: ' + (err.response?.data?.detail || err.message))
   }
 }
 
-const unassignTask = async (taskId) => {
-  if (!confirm('确定要取消该任务的分配吗？')) return
+const unassignTaskSet = async (taskSetId) => {
+  if (!confirm('确定要取消该任务集合的分配吗？')) return
   try {
-    await axios.delete(`/api/admin/assign-task?user_id=${selectedUserId.value}&task_id=${taskId}`)
-    await loadAssignTasks()
+    await axios.delete(`/api/admin/assign-task-set?user_id=${selectedUserId.value}&task_set_id=${taskSetId}`)
+    await loadAssignTaskSets()
     // 刷新任务列表
     if (selectedSetId.value) {
-      await loadUserTasks(selectedUserId.value, selectedSetId.value)
+      await loadUserTaskSets(selectedUserId.value)
     }
-    // 如果当前查看的任务被取消了分配，清空详情
-    if (selectedTaskId.value === taskId) {
+    // 如果当前查看的任务集合被取消了分配，清空详情
+    if (selectedSetId.value === taskSetId) {
       currentTask.value = null
       selectedTaskId.value = null
+      tasks.value = []
     }
   } catch (err) {
     alert('取消分配失败: ' + (err.response?.data?.detail || err.message))
@@ -962,6 +1247,72 @@ const exportTaskSet = async (set) => {
   } catch (err) {
     alert('导出失败: ' + (err.response?.data?.detail || err.message))
   }
+}
+
+// ==================== 导入历史与版本控制 ====================
+const showImportHistory = async (set) => {
+  currentHistoryTaskSet.value = set
+  showHistoryModal.value = true
+  await loadImportBatches(set.id)
+}
+
+const closeHistoryModal = () => {
+  showHistoryModal.value = false
+  currentHistoryTaskSet.value = null
+  importBatches.value = []
+}
+
+const loadImportBatches = async (taskSetId) => {
+  try {
+    const res = await axios.get(`/api/admin/task-sets/${taskSetId}/import-batches`)
+    importBatches.value = res.data
+  } catch (err) {
+    alert('加载导入历史失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+const viewBatchDiff = async (batch) => {
+  // 获取该批次下的所有历史记录
+  try {
+    const res = await axios.get(`/api/admin/task-sets/${currentHistoryTaskSet.value.id}/import-history`)
+    currentBatchHistory.value = res.data.filter(h => h.import_batch_id === batch.batch_id)
+
+    // 如果只有一条记录，直接显示diff
+    if (currentBatchHistory.value.length === 1) {
+      await viewSingleDiff(currentBatchHistory.value[0].id)
+    } else if (currentBatchHistory.value.length > 1) {
+      // 多条记录，让用户选择（简化处理：显示第一条）
+      await viewSingleDiff(currentBatchHistory.value[0].id)
+    }
+  } catch (err) {
+    alert('加载变更对比失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+const viewSingleDiff = async (historyId) => {
+  try {
+    const res = await axios.get(`/api/admin/task-sets/${currentHistoryTaskSet.value.id}/import-history/${historyId}/diff`)
+    currentDiff.value = res.data
+    showDiffModal.value = true
+  } catch (err) {
+    alert('加载对比失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+const closeDiffModal = () => {
+  showDiffModal.value = false
+  currentDiff.value = null
+  currentBatchHistory.value = []
+}
+
+const getChangeTypeText = (type) => {
+  const typeMap = {
+    'added': '新增',
+    'removed': '删除',
+    'modified': '修改',
+    'unchanged': '未变更'
+  }
+  return typeMap[type] || type
 }
 
 // ==================== 任务管理 ====================
@@ -1239,9 +1590,194 @@ const selectTask = async (taskId) => {
   try {
     // 获取V2版本数据
     const res = await axios.get(`/api/tasks/${taskId}?version=2`)
+    console.log('任务详情返回:', res.data)
     currentTask.value = res.data
   } catch (err) {
     console.error('加载任务详情失败:', err)
+  }
+}
+
+// 切换 tree node 选择状态
+const toggleTreeNode = async (node) => {
+  try {
+    await axios.patch(`/api/tree-nodes/${node.id}/selection`, {
+      selected: !node.selected
+    })
+    node.selected = !node.selected
+  } catch (err) {
+    console.error('更新 tree node 失败:', err)
+  }
+}
+
+// 更新 tree node
+const updateTreeNode = async (updatedNode) => {
+  try {
+    // 调用后端 API 更新节点
+    const res = await axios.patch(`/api/tree-nodes/${updatedNode.id}`, {
+      claim: updatedNode.claim,
+      rubrics: updatedNode.rubrics
+    })
+
+    // 递归查找并更新本地节点
+    const updateNodeInTree = (node) => {
+      if (node.id === updatedNode.id) {
+        // 更新当前节点
+        node.claim = res.data.claim
+        node.rubrics = res.data.rubrics
+        return true
+      }
+      // 递归查找子节点
+      if (node.nodes) {
+        for (const child of node.nodes) {
+          if (updateNodeInTree(child)) {
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    if (currentTask.value && currentTask.value.tree) {
+      updateNodeInTree(currentTask.value.tree)
+    }
+  } catch (err) {
+    console.error('更新节点失败:', err)
+    alert('更新节点失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+// 删除 tree node
+const deleteTreeNode = async (nodeToDelete) => {
+  try {
+    // 调用后端 API 删除节点
+    await axios.delete(`/api/tree-nodes/${nodeToDelete.id}`)
+
+    // 递归查找并从本地树中删除节点
+    const deleteNodeInTree = (node) => {
+      if (node.nodes) {
+        const index = node.nodes.findIndex(n => n.id === nodeToDelete.id)
+        if (index !== -1) {
+          node.nodes.splice(index, 1)
+          return true
+        }
+        // 递归查找子节点
+        for (const child of node.nodes) {
+          if (deleteNodeInTree(child)) {
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    if (currentTask.value && currentTask.value.tree) {
+      deleteNodeInTree(currentTask.value.tree)
+    }
+  } catch (err) {
+    console.error('删除节点失败:', err)
+    alert('删除节点失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+// 新增 tree node 子节点
+const addTreeNodeChild = async ({ parentNode, childData }) => {
+  console.log('addTreeNodeChild called:', { parentNode, childData })
+  try {
+    // 调用后端 API 添加子节点
+    console.log('Sending POST to:', `/api/tree-nodes/${parentNode.id}/children`, 'with data:', childData)
+    const res = await axios.post(`/api/tree-nodes/${parentNode.id}/children`, childData)
+    console.log('Response:', res.data)
+    const newChild = res.data
+
+    // 递归查找父节点并添加子节点到本地树
+    const addChildToNode = (node) => {
+      if (node.id === parentNode.id) {
+        // 找到父节点，添加子节点
+        if (!node.nodes) {
+          node.nodes = []
+        }
+        node.nodes.push(newChild)
+        // 如果父节点是 leaf 类型，转换为 branch
+        if (node.type === 'leaf') {
+          node.type = 'branch'
+        }
+        return true
+      }
+      // 递归查找子节点
+      if (node.nodes) {
+        for (const child of node.nodes) {
+          if (addChildToNode(child)) {
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    if (currentTask.value && currentTask.value.tree) {
+      addChildToNode(currentTask.value.tree)
+    }
+  } catch (err) {
+    console.error('添加子节点失败:', err)
+    alert('添加子节点失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+// 更新树节点专业性标记
+const updateTreeNodeProfessional = async ({ node, professional }) => {
+  try {
+    await axios.patch(`/api/tree-nodes/${node.id}/professional`, {
+      professional
+    })
+    // 递归查找并更新本地状态 - 深拷贝并替换整个树来强制触发 Vue 响应式更新
+    const updateNodeInTree = (n) => {
+      if (n.id === node.id) {
+        return { ...n, professional }
+      }
+      if (n.nodes && n.nodes.length > 0) {
+        return { ...n, nodes: n.nodes.map(updateNodeInTree) }
+      }
+      return n
+    }
+    if (currentTask.value && currentTask.value.tree) {
+      currentTask.value.tree = updateNodeInTree(currentTask.value.tree)
+    }
+  } catch (err) {
+    console.error('更新专业性标记失败:', err)
+    alert('更新失败: ' + (err.response?.data?.detail || err.message))
+  }
+}
+
+// 更新树节点必答标记
+const updateTreeNodeRequired = async ({ node, required }) => {
+  try {
+    await axios.patch(`/api/tree-nodes/${node.id}/required`, {
+      required
+    })
+    // 递归查找并更新本地状态（包括所有子节点）
+    const updateNodeInTree = (n) => {
+      if (n.id === node.id) {
+        // 更新当前节点及其所有后代
+        const updateDescendants = (desc) => {
+          const updated = { ...desc, required }
+          if (desc.nodes && desc.nodes.length > 0) {
+            updated.nodes = desc.nodes.map(updateDescendants)
+          }
+          return updated
+        }
+        return updateDescendants(n)
+      }
+      if (n.nodes && n.nodes.length > 0) {
+        return { ...n, nodes: n.nodes.map(updateNodeInTree) }
+      }
+      return n
+    }
+    if (currentTask.value && currentTask.value.tree) {
+      currentTask.value.tree = updateNodeInTree(currentTask.value.tree)
+    }
+  } catch (err) {
+    console.error('更新必答标记失败:', err)
+    alert('更新失败: ' + (err.response?.data?.detail || err.message))
   }
 }
 
@@ -1382,6 +1918,22 @@ onMounted(() => {
   background: #e0e0e0;
 }
 
+.change-password-btn {
+  padding: 6px 16px;
+  background: #1890ff;
+  border: 1px solid #1890ff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  color: white;
+  transition: all 0.2s;
+}
+
+.change-password-btn:hover {
+  background: #40a9ff;
+  border-color: #40a9ff;
+}
+
 .main-content {
   flex: 1;
   display: flex;
@@ -1398,6 +1950,55 @@ onMounted(() => {
 .column-1 {
   width: 300px;
   background: #fafafa;
+  position: relative;
+  transition: width 0.3s ease;
+}
+
+.column-1.collapsed {
+  width: 24px;
+  min-width: 24px;
+}
+
+.column-1.collapsed .column-header,
+.column-1.collapsed .column-content {
+  display: none;
+}
+
+/* 折叠切换按钮 */
+.collapse-toggle {
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 60px;
+  background: #d9d9d9;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: background 0.2s;
+}
+
+.collapse-toggle:hover {
+  background: #1890ff;
+}
+
+.collapse-arrow {
+  font-size: 8px;
+  color: white;
+  transition: transform 0.3s ease;
+}
+
+.collapse-arrow.collapsed {
+  transform: rotate(180deg);
+}
+
+.column-1.collapsed .collapse-toggle {
+  right: 0;
+  border-radius: 0 4px 4px 0;
 }
 
 .column-2 {
@@ -1484,7 +2085,7 @@ onMounted(() => {
 .item-actions {
   display: flex;
   gap: 4px;
-  margin-left: 8px;
+  margin-left: 4px;
 }
 
 .action-btn {
@@ -2019,6 +2620,38 @@ onMounted(() => {
   padding: 20px;
 }
 
+/* 任务集合分配样式 */
+.assign-taskset-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+
+.assign-taskset-item:last-child {
+  border-bottom: none;
+}
+
+.taskset-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.taskset-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.taskset-desc {
+  font-size: 12px;
+  color: #666;
+}
+
 /* 标准答案样式 */
 .reference-answers-section {
   margin-top: 24px;
@@ -2525,5 +3158,782 @@ onMounted(() => {
 
 .reference-answer-input:focus {
   outline: none;
+}
+
+/* 修改密码弹窗样式 */
+.change-password-modal {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 400px;
+  overflow: hidden;
+}
+
+.change-password-modal .modal-header {
+  padding: 20px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.change-password-modal .modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.change-password-modal .modal-header .close-btn {
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.change-password-modal .modal-header .close-btn:hover {
+  color: #333;
+}
+
+.change-password-modal .modal-body {
+  padding: 20px;
+}
+
+.change-password-modal .form-group {
+  margin-bottom: 16px;
+}
+
+.change-password-modal .form-group:last-child {
+  margin-bottom: 0;
+}
+
+.change-password-modal .form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.change-password-modal .form-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.change-password-modal .form-group input:focus {
+  outline: none;
+  border-color: #1890ff;
+}
+
+.change-password-modal .error-message {
+  color: #ff4d4f;
+  font-size: 14px;
+  text-align: center;
+  margin-top: 8px;
+}
+
+.change-password-modal .modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #e8e8e8;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.change-password-modal .modal-footer .btn-confirm:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 导入历史弹窗样式 */
+.history-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid #e8e8e8;
+  transition: background-color 0.2s;
+}
+
+.history-item:hover {
+  background-color: #f5f5f5;
+}
+
+.history-info {
+  flex: 1;
+}
+
+.history-time {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.history-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: #666;
+}
+
+.btn-view-diff {
+  padding: 6px 16px;
+  background: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color 0.2s;
+}
+
+.btn-view-diff:hover {
+  background: #40a9ff;
+}
+
+/* Diff对比弹窗样式 */
+.diff-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.diff-warning {
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  color: #d46b08;
+  font-size: 14px;
+}
+
+.diff-section {
+  margin-bottom: 24px;
+}
+
+.diff-section h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e8e8e8;
+}
+
+.diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diff-item {
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e8e8e8;
+}
+
+.diff-item.added {
+  border-color: #b7eb8f;
+  background: #f6ffed;
+}
+
+.diff-item.removed {
+  border-color: #ffccc7;
+  background: #fff2f0;
+}
+
+.diff-item.modified {
+  border-color: #ffe58f;
+  background: #fffbe6;
+}
+
+.diff-item.unchanged {
+  background: #fafafa;
+}
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.03);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.diff-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.diff-badge.added {
+  background: #52c41a;
+  color: white;
+}
+
+.diff-badge.removed {
+  background: #ff4d4f;
+  color: white;
+}
+
+.diff-badge.modified {
+  background: #faad14;
+  color: white;
+}
+
+.diff-badge.unchanged {
+  background: #d9d9d9;
+  color: #666;
+}
+
+.diff-title {
+  font-weight: 500;
+  color: #333;
+  flex: 1;
+}
+
+.diff-content {
+  padding: 12px;
+  font-size: 13px;
+}
+
+.diff-label {
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.diff-value {
+  color: #333;
+}
+
+.diff-value .changed {
+  color: #ff4d4f;
+  font-weight: 500;
+}
+
+.diff-old {
+  color: #666;
+}
+
+.diff-new {
+  color: #52c41a;
+}
+
+.diff-summary {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.diff-subsection {
+  margin-top: 16px;
+}
+
+.diff-subtitle {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.diff-subtitle.removed {
+  background: #fff2f0;
+  color: #cf1322;
+}
+
+.diff-subtitle.added {
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.diff-answer-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.diff-answer-item.removed {
+  background: #fff2f0;
+  border-left: 3px solid #ff4d4f;
+}
+
+.diff-answer-item.added {
+  background: #f6ffed;
+  border-left: 3px solid #52c41a;
+}
+
+/* 模态框头部样式 */
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.modal-header .close-btn {
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.modal-header .close-btn:hover {
+  color: #333;
+}
+
+.fullscreen-modal {
+  width: 90%;
+  max-width: 900px;
+  max-height: 80vh;
+}
+
+/* Tree 组件样式 */
+.tree-section {
+  margin-top: 24px;
+}
+
+.section-title {
+  margin: 16px 0;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tree-container {
+  padding: 16px;
+  background: #f5f5f5;
+  border-radius: 8px;
+}
+
+/* Root 节点样式 */
+.tree-node.is-root {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tree-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.tree-summary-label {
+  font-weight: 600;
+  color: #52c41a;
+  flex-shrink: 0;
+}
+
+.tree-summary-text {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #262626;
+}
+
+/* 展开图标 */
+.tree-expand-icon {
+  font-size: 12px;
+  color: #1890ff;
+  transition: transform 0.2s;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.tree-expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.tree-expand-icon-placeholder {
+  width: 12px;
+  flex-shrink: 0;
+}
+
+/* 节点头部 - 层级背景色 - 使用 :deep 确保应用到子组件 */
+:deep(.tree-node-header) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 4px 0;
+  border-radius: 6px;
+  transition: all 0.2s;
+  cursor: pointer;
+  border: 2px solid;
+  pointer-events: auto;
+}
+
+:deep(.tree-node-header > *) {
+  pointer-events: auto;
+}
+
+/* Level 1 - 浅蓝色 */
+:deep(.tree-node-header.tree-level-1) {
+  background-color: #e6f7ff !important;
+  border-color: #1890ff !important;
+}
+
+:deep(.tree-node-header.tree-level-1:hover) {
+  background-color: #bae7ff !important;
+}
+
+/* Level 2 - 浅绿色 */
+:deep(.tree-node-header.tree-level-2) {
+  background-color: #f6ffed !important;
+  border-color: #52c41a !important;
+}
+
+:deep(.tree-node-header.tree-level-2:hover) {
+  background-color: #d9f7be !important;
+}
+
+/* Level 3 - 浅橙色 */
+:deep(.tree-node-header.tree-level-3) {
+  background-color: #fff7e6 !important;
+  border-color: #fa8c16 !important;
+}
+
+:deep(.tree-node-header.tree-level-3:hover) {
+  background-color: #ffe7ba !important;
+}
+
+/* Level 4+ - 浅紫色 */
+:deep(.tree-node-header.tree-level-4) {
+  background-color: #f9f0ff !important;
+  border-color: #722ed1 !important;
+}
+
+:deep(.tree-node-header.tree-level-4:hover) {
+  background-color: #efdbff !important;
+}
+
+/* Leaf 节点 - 整体包裹样式 */
+:deep(.tree-leaf-wrapper) {
+  background: #fafafa;
+  border: 2px solid #d9d9d9;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* 叶子节点标题（claim） */
+:deep(.tree-leaf-title) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+:deep(.tree-leaf-claim) {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #262626;
+  font-weight: 500;
+}
+
+/* 叶子节点样式 */
+:deep(.tree-node.is-leaf-node) {
+  margin: 8px 0;
+}
+
+/* 操作按钮 */
+:deep(.tree-actions) {
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+:deep(.tree-btn) {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  pointer-events: auto;
+  position: relative;
+  z-index: 10;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+:deep(.tree-btn-edit) {
+  background: #1890ff;
+  color: white;
+}
+
+:deep(.tree-btn-edit:hover) {
+  background: #40a9ff;
+}
+
+:deep(.tree-btn-delete) {
+  background: #ff4d4f;
+  color: white;
+}
+
+:deep(.tree-btn-delete:hover) {
+  background: #ff7875;
+}
+
+:deep(.tree-btn-add) {
+  background: #52c41a;
+  color: white;
+  width: auto;
+  padding: 0 12px;
+  height: 28px;
+}
+
+:deep(.tree-btn-add:hover) {
+  background: #73d13d;
+}
+
+:deep(.tree-btn-remove) {
+  background: #ff4d4f;
+  color: white;
+  font-size: 12px;
+}
+
+:deep(.tree-btn-save) {
+  background: #52c41a;
+  color: white;
+  width: auto;
+  padding: 0 16px;
+}
+
+:deep(.tree-btn-cancel) {
+  background: #d9d9d9;
+  color: #333;
+  width: auto;
+  padding: 0 16px;
+}
+
+/* 编辑模式 */
+:deep(.tree-node.is-editing) {
+  background: #fff;
+  border: 2px solid #1890ff;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 8px 0;
+}
+
+:deep(.tree-edit-claim-wrapper) {
+  margin-bottom: 12px;
+}
+
+:deep(.tree-edit-claim) {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+:deep(.tree-edit-claim:focus) {
+  outline: none;
+  border-color: #1890ff;
+}
+
+:deep(.tree-edit-input) {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+:deep(.tree-edit-input:focus) {
+  outline: none;
+  border-color: #1890ff;
+}
+
+:deep(.tree-edit-score.negative-score) {
+  background: #fff1f0;
+  border-color: #ff4d4f;
+  color: #cf1322;
+}
+
+:deep(.tree-rubric-edit-section) {
+  margin: 12px 0;
+}
+
+:deep(.tree-rubrics-edit-table) {
+  margin-bottom: 8px;
+}
+
+:deep(.tree-rubrics-edit-table td) {
+  padding: 8px;
+}
+
+:deep(.tree-rubric-add-btn) {
+  text-align: center;
+  margin-top: 8px;
+}
+
+:deep(.tree-edit-actions) {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e8e8e8;
+}
+
+/* 负分数红色背景 */
+:deep(.rubric-score.negative-score) {
+  background: #ffcccc !important;
+  color: #cc0000 !important;
+  font-weight: bold;
+}
+
+/* 复选框 */
+.tree-checkbox {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #d9d9d9;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  background: white;
+  transition: all 0.2s;
+  font-size: 12px;
+}
+
+.tree-checkbox:hover {
+  border-color: #1890ff;
+}
+
+.tree-checkbox.checked {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: white;
+}
+
+/* Claim 文本 */
+.tree-claim {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #262626;
+}
+
+/* 子节点容器 */
+.tree-children {
+  margin-top: 4px;
+}
+
+/* Rubric 表格 - 使用 :deep 确保应用到子组件 */
+:deep(.tree-rubrics-wrapper) {
+  margin: 8px 0 16px;
+}
+
+:deep(.tree-rubrics-table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: white;
+  border: 2px solid #333 !important;
+}
+
+:deep(.tree-rubrics-table th),
+:deep(.tree-rubrics-table td) {
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid #333 !important;
+}
+
+:deep(.tree-rubrics-table th) {
+  background: #f0f0f0;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #333 !important;
+}
+
+:deep(.tree-rubrics-table td) {
+  color: #262626;
+  border: 1px solid #999 !important;
+}
+
+:deep(.tree-rubrics-table .rubric-criterion) {
+  width: auto;
+}
+
+:deep(.tree-rubrics-table .rubric-score) {
+  width: 80px;
+  text-align: center;
+  font-weight: 500;
+  border-left: 2px solid #333 !important;
+}
+
+:deep(.tree-rubrics-table tr:hover td) {
+  background: #f5f5f5;
+}
+
+:deep(.tree-rubrics-table tr.negative-score td) {
+  background: #ffcccc;
+  color: #cc0000;
+}
+
+:deep(.tree-rubrics-table tr.negative-score .rubric-score) {
+  font-weight: bold;
 }
 </style>

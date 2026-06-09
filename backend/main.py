@@ -9,8 +9,11 @@ from models import (
     TaskSetCreate, TaskSetUpdate, TaskCreate, TaskUpdate,
     RubricCreate, RubricUpdateContent,
     ReferenceAnswer, ReferenceAnswerCreate, ReferenceAnswerUpdate,
-    BatchImportRequest, BatchImportResponse
+    BatchImportRequest, BatchImportResponse,
+    ImportHistory, RubricHistory, TaskHistory, RubricDiff, TaskDiff,
+    TreeNode, TreeNodeSelectionUpdate, TreeNodeProfessionalUpdate, TreeNodeRequiredUpdate
 )
+import uuid
 import hashlib
 import jwt
 import re
@@ -230,7 +233,7 @@ def get_tasks(task_set_id: int, user: dict = Depends(get_current_user_with_root)
     conn.close()
     return [Task(**dict(t)) for t in tasks]
 
-# 获取任务详情（含rubrics和标准答案）
+# 获取任务详情（含rubrics、标准答案和tree结构）
 @app.get("/api/tasks/{task_id}", response_model=TaskWithDetails)
 def get_task_detail(task_id: int, version: int = 0, current_user: int = Depends(get_current_user)):
     conn = get_db()
@@ -256,11 +259,16 @@ def get_task_detail(task_id: int, version: int = 0, current_user: int = Depends(
         cursor.execute("SELECT * FROM reference_answers WHERE task_id = ? ORDER BY id", (task_id,))
         reference_answers = cursor.fetchall()
 
+    # 获取 tree 数据
+    tree_data = get_tree_nodes(cursor, task_id, current_user)
+
     conn.close()
 
     task_dict = dict(task)
     task_dict["rubrics"] = [Rubric(**dict(r)) for r in rubrics]
     task_dict["reference_answers"] = [ReferenceAnswer(**dict(r)) for r in reference_answers]
+    # tree 只取第一个根节点（如果有多个根节点，目前只取第一个）
+    task_dict["tree"] = tree_data[0] if tree_data else None
 
     return TaskWithDetails(**task_dict)
 
@@ -340,6 +348,407 @@ def delete_rubric_user(rubric_id: int, current_user: int = Depends(get_current_u
     conn.commit()
     conn.close()
     return {"message": "删除成功"}
+
+
+# Tree 节点选择状态更新
+@app.patch("/api/tree-nodes/{node_id}/selection")
+def update_tree_node_selection(
+    node_id: int,
+    data: TreeNodeSelectionUpdate,
+    current_user: int = Depends(get_current_user)
+):
+    """更新 tree 节点的选择状态"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    # 检查用户权限：需要是任务分配的用户或 root
+    cursor.execute("""
+        SELECT t.task_set_id FROM tree_nodes tn
+        JOIN tasks t ON tn.task_id = t.id
+        WHERE tn.id = ?
+    """, (node_id,))
+    task_set = cursor.fetchone()
+
+    if task_set:
+        cursor.execute("SELECT 1 FROM user_task_sets WHERE user_id = ? AND task_set_id = ?",
+                       (current_user, task_set["task_set_id"]))
+        has_permission = cursor.fetchone() is not None
+
+        if not has_permission:
+            # 检查是否是 root
+            cursor.execute("SELECT is_root FROM users WHERE id = ?", (current_user,))
+            user = cursor.fetchone()
+            has_permission = user and user["is_root"]
+
+        if not has_permission:
+            conn.close()
+            raise HTTPException(status_code=403, detail="没有权限修改此节点")
+
+    # 更新或插入选择状态
+    cursor.execute("""
+        INSERT INTO tree_node_selections (node_id, user_id, selected, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(node_id, user_id)
+        DO UPDATE SET selected = ?, updated_at = ?
+    """, (node_id, current_user, data.selected, datetime.now(),
+          data.selected, datetime.now()))
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "更新成功", "node_id": node_id, "selected": data.selected}
+
+
+@app.patch("/api/tree-nodes/{node_id}/professional")
+def update_tree_node_professional(
+    node_id: int,
+    data: TreeNodeProfessionalUpdate,
+    current_user: int = Depends(get_current_user)
+):
+    """更新 tree 节点的专业性标记"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    # 检查用户权限：需要是任务分配的用户或 root
+    cursor.execute("""
+        SELECT t.task_set_id FROM tree_nodes tn
+        JOIN tasks t ON tn.task_id = t.id
+        WHERE tn.id = ?
+    """, (node_id,))
+    task_set = cursor.fetchone()
+
+    if task_set:
+        cursor.execute("SELECT 1 FROM user_task_sets WHERE user_id = ? AND task_set_id = ?",
+                       (current_user, task_set["task_set_id"]))
+        has_permission = cursor.fetchone() is not None
+
+        if not has_permission:
+            # 检查是否是 root
+            cursor.execute("SELECT is_root FROM users WHERE id = ?", (current_user,))
+            user = cursor.fetchone()
+            has_permission = user and user["is_root"]
+
+        if not has_permission:
+            conn.close()
+            raise HTTPException(status_code=403, detail="没有权限修改此节点")
+
+    # 更新或插入专业性标记
+    cursor.execute("""
+        INSERT INTO tree_node_selections (node_id, user_id, professional, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(node_id, user_id)
+        DO UPDATE SET professional = ?, updated_at = ?
+    """, (node_id, current_user, data.professional, datetime.now(),
+          data.professional, datetime.now()))
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "更新成功", "node_id": node_id, "professional": data.professional}
+
+
+@app.patch("/api/tree-nodes/{node_id}/required")
+def update_tree_node_required(
+    node_id: int,
+    data: TreeNodeRequiredUpdate,
+    current_user: int = Depends(get_current_user)
+):
+    """更新 tree 节点的必答标记，并级联更新所有子节点"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    # 检查用户权限：需要是任务分配的用户或 root
+    cursor.execute("""
+        SELECT t.task_set_id FROM tree_nodes tn
+        JOIN tasks t ON tn.task_id = t.id
+        WHERE tn.id = ?
+    """, (node_id,))
+    task_set = cursor.fetchone()
+
+    if task_set:
+        cursor.execute("SELECT 1 FROM user_task_sets WHERE user_id = ? AND task_set_id = ?",
+                       (current_user, task_set["task_set_id"]))
+        has_permission = cursor.fetchone() is not None
+
+        if not has_permission:
+            # 检查是否是 root
+            cursor.execute("SELECT is_root FROM users WHERE id = ?", (current_user,))
+            user = cursor.fetchone()
+            has_permission = user and user["is_root"]
+
+        if not has_permission:
+            conn.close()
+            raise HTTPException(status_code=403, detail="没有权限修改此节点")
+
+    # 递归获取所有子节点ID
+    def get_all_descendant_ids(cursor, parent_id):
+        ids = [parent_id]
+        cursor.execute("SELECT id FROM tree_nodes WHERE parent_id = ?", (parent_id,))
+        children = cursor.fetchall()
+        for child in children:
+            ids.extend(get_all_descendant_ids(cursor, child["id"]))
+        return ids
+
+    # 获取所有需要更新的节点ID（包括当前节点及其所有后代）
+    all_node_ids = get_all_descendant_ids(cursor, node_id)
+
+    # 更新所有节点的必答标记
+    now = datetime.now()
+    for nid in all_node_ids:
+        cursor.execute("""
+            INSERT INTO tree_node_selections (node_id, user_id, required, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(node_id, user_id)
+            DO UPDATE SET required = ?, updated_at = ?
+        """, (nid, current_user, data.required, now, data.required, now))
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "更新成功", "node_id": node_id, "required": data.required, "affected_nodes": len(all_node_ids)}
+
+
+# 新增 tree node 子节点
+@app.post("/api/tree-nodes/{node_id}/children")
+def add_tree_node_child(
+    node_id: int,
+    data: dict,
+    current_user: int = Depends(get_current_user)
+):
+    """为指定节点添加子节点"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查父节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    parent_node = cursor.fetchone()
+    if not parent_node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="父节点不存在")
+
+    # 获取当前最大 order
+    cursor.execute(
+        "SELECT MAX(node_order) as max_order FROM tree_nodes WHERE parent_id = ?",
+        (node_id,)
+    )
+    result = cursor.fetchone()
+    new_order = (result["max_order"] or 0) + 1
+
+    # 如果父节点是 leaf，先转换为 branch
+    if parent_node["node_type"] == "leaf":
+        cursor.execute(
+            "UPDATE tree_nodes SET node_type = 'branch' WHERE id = ?",
+            (node_id,)
+        )
+
+    # 插入新子节点
+    child_claim = data.get("claim", "")
+    child_type = data.get("type", "leaf")
+    child_rubrics = data.get("rubrics", [])
+
+    cursor.execute(
+        """INSERT INTO tree_nodes (task_id, claim, node_type, parent_id, rubrics, node_order)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (parent_node["task_id"], child_claim, child_type, node_id,
+         json.dumps(child_rubrics, ensure_ascii=False) if child_rubrics else None,
+         new_order)
+    )
+    new_node_id = cursor.lastrowid
+
+    conn.commit()
+
+    # 返回新节点信息
+    cursor.execute(
+        """SELECT tn.*, COALESCE(tns.selected, 0) as selected
+           FROM tree_nodes tn
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           WHERE tn.id = ?""",
+        (current_user, new_node_id)
+    )
+    new_node = cursor.fetchone()
+    conn.close()
+
+    return {
+        "id": new_node["id"],
+        "claim": new_node["claim"],
+        "type": new_node["node_type"],
+        "selected": bool(new_node["selected"]),
+        "rubrics": json.loads(new_node["rubrics"]) if new_node["rubrics"] else [],
+        "nodes": []
+    }
+
+
+# 更新 tree node
+@app.patch("/api/tree-nodes/{node_id}")
+def update_tree_node(
+    node_id: int,
+    data: dict,
+    current_user: int = Depends(get_current_user)
+):
+    """更新节点内容和 rubrics"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    # 构建更新字段
+    updates = []
+    params = []
+
+    if "claim" in data:
+        updates.append("claim = ?")
+        params.append(data["claim"])
+
+    if "rubrics" in data:
+        updates.append("rubrics = ?")
+        params.append(json.dumps(data["rubrics"], ensure_ascii=False))
+
+    if updates:
+        params.append(node_id)
+        cursor.execute(
+            f"UPDATE tree_nodes SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        conn.commit()
+
+    # 返回更新后的节点
+    cursor.execute(
+        """SELECT tn.*, COALESCE(tns.selected, 0) as selected
+           FROM tree_nodes tn
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           WHERE tn.id = ?""",
+        (current_user, node_id)
+    )
+    updated_node = cursor.fetchone()
+    conn.close()
+
+    return {
+        "id": updated_node["id"],
+        "claim": updated_node["claim"],
+        "type": updated_node["node_type"],
+        "selected": bool(updated_node["selected"]),
+        "rubrics": json.loads(updated_node["rubrics"]) if updated_node["rubrics"] else [],
+        "nodes": []  # 子节点需要单独获取
+    }
+
+
+# 删除 tree node
+@app.delete("/api/tree-nodes/{node_id}")
+def delete_tree_node(
+    node_id: int,
+    current_user: int = Depends(get_current_user)
+):
+    """删除节点及其所有子节点"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    # 递归删除节点及其子节点
+    def delete_node_recursive(node_id_to_delete):
+        # 先获取所有子节点
+        cursor.execute("SELECT id FROM tree_nodes WHERE parent_id = ?", (node_id_to_delete,))
+        children = cursor.fetchall()
+
+        # 递归删除子节点
+        for child in children:
+            delete_node_recursive(child["id"])
+
+        # 删除节点的选择记录
+        cursor.execute("DELETE FROM tree_node_selections WHERE node_id = ?", (node_id_to_delete,))
+
+        # 删除节点
+        cursor.execute("DELETE FROM tree_nodes WHERE id = ?", (node_id_to_delete,))
+
+    delete_node_recursive(node_id)
+    conn.commit()
+    conn.close()
+
+    return {"message": "删除成功", "node_id": node_id}
+
+
+# 将 leaf 节点转为 branch 节点
+@app.patch("/api/tree-nodes/{node_id}/convert-to-branch")
+def convert_tree_node_to_branch(
+    node_id: int,
+    current_user: int = Depends(get_current_user)
+):
+    """将叶子节点转换为分支节点"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    node = cursor.fetchone()
+    if not node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    if node["node_type"] == "branch":
+        conn.close()
+        return {"message": "节点已经是分支类型", "node_id": node_id}
+
+    # 更新节点类型为 branch
+    cursor.execute(
+        "UPDATE tree_nodes SET node_type = 'branch' WHERE id = ?",
+        (node_id,)
+    )
+    conn.commit()
+
+    # 返回更新后的节点
+    cursor.execute(
+        """SELECT tn.*, COALESCE(tns.selected, 0) as selected
+           FROM tree_nodes tn
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           WHERE tn.id = ?""",
+        (current_user, node_id)
+    )
+    updated_node = cursor.fetchone()
+    conn.close()
+
+    return {
+        "message": "转换成功",
+        "node": {
+            "id": updated_node["id"],
+            "claim": updated_node["claim"],
+            "type": updated_node["node_type"],
+            "selected": bool(updated_node["selected"]),
+            "rubrics": json.loads(updated_node["rubrics"]) if updated_node["rubrics"] else [],
+            "nodes": []
+        }
+    }
+
 
 # 完成任务
 @app.patch("/api/tasks/{task_id}/complete", response_model=Task)
@@ -942,6 +1351,64 @@ def export_task_set(task_set_id: int, current_user: dict = Depends(require_root)
     return export_data
 
 
+def insert_tree_nodes(cursor, task_id: int, node, parent_id: int = None, order: int = 0):
+    """递归插入 tree 节点"""
+    claim = node.get("claim", "")
+    node_type = node.get("type", "leaf")
+    rubrics = node.get("rubrics", [])
+
+    # 插入当前节点
+    cursor.execute(
+        """INSERT INTO tree_nodes (task_id, claim, node_type, parent_id, rubrics, node_order)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (task_id, claim, node_type, parent_id,
+         json.dumps(rubrics, ensure_ascii=False) if rubrics else None,
+         order)
+    )
+    node_id = cursor.lastrowid
+
+    # 递归插入子节点
+    nodes = node.get("nodes", [])
+    for idx, child_node in enumerate(nodes):
+        insert_tree_nodes(cursor, task_id, child_node, node_id, idx)
+
+    return node_id
+
+
+def get_tree_nodes(cursor, task_id: int, user_id: int, parent_id: int = None) -> List[dict]:
+    """递归获取 tree 节点"""
+    cursor.execute(
+        """SELECT tn.*, COALESCE(tns.selected, 0) as selected, COALESCE(tns.professional, 0) as professional, COALESCE(tns.required, 0) as required
+           FROM tree_nodes tn
+           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id AND tns.user_id = ?
+           WHERE tn.task_id = ? AND tn.parent_id IS ?
+           ORDER BY tn.node_order""",
+        (user_id, task_id, parent_id)
+    )
+    nodes = cursor.fetchall()
+
+    result = []
+    for node in nodes:
+        node_dict = {
+            "id": node["id"],
+            "claim": node["claim"],
+            "type": node["node_type"],
+            "selected": bool(node["selected"]),
+            "professional": bool(node["professional"]),
+            "required": bool(node["required"]),
+            "rubrics": json.loads(node["rubrics"]) if node["rubrics"] else [],
+            "nodes": []
+        }
+
+        # 递归获取子节点
+        if node["node_type"] == "branch":
+            node_dict["nodes"] = get_tree_nodes(cursor, task_id, user_id, node["id"])
+
+        result.append(node_dict)
+
+    return result
+
+
 @app.post("/api/admin/batch-import")
 def batch_import(data: BatchImportRequest, current_user: dict = Depends(require_root)):
     """批量导入任务、rubrics和标准答案（事务性操作）"""
@@ -952,6 +1419,33 @@ def batch_import(data: BatchImportRequest, current_user: dict = Depends(require_
         total_tasks = 0
         total_rubrics = 0
         total_answers = 0
+        total_tree_nodes = 0
+
+        # 生成批次ID
+        batch_id = str(uuid.uuid4())
+
+        # 保存原始导入数据到历史表
+        for task_item in data.tasks:
+            collection_name = task_item.collection_name
+            cursor.execute("SELECT id FROM task_sets WHERE name = ?", (collection_name,))
+            row = cursor.fetchone()
+            if row:
+                task_set_id = row["id"]
+            else:
+                cursor.execute(
+                    "INSERT INTO task_sets (name, description) VALUES (?, ?)",
+                    (collection_name, "批量导入创建")
+                )
+                task_set_id = cursor.lastrowid
+
+            # 保存原始数据
+            cursor.execute(
+                """INSERT INTO import_history
+                   (task_set_id, imported_by, import_batch_id, original_data, import_type)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (task_set_id, current_user["id"], batch_id,
+                 json.dumps(task_item.dict(), ensure_ascii=False), "import")
+            )
 
         # 缓存：任务集合名称 -> id
         task_set_cache = {}
@@ -1060,10 +1554,18 @@ def batch_import(data: BatchImportRequest, current_user: dict = Depends(require_
                 answer_cache[task_id].add(answer_content)
                 total_answers += 1
 
+            # 导入 tree 数据
+            if task_item.tree and task_item.tree.tree:
+                # 先删除旧的 tree 节点
+                cursor.execute("DELETE FROM tree_nodes WHERE task_id = ?", (task_id,))
+                # 递归插入 tree 节点
+                insert_tree_nodes(cursor, task_id, task_item.tree.tree.model_dump())
+                total_tree_nodes += 1
+
         conn.commit()
         return BatchImportResponse(
             success=True,
-            message=f"成功导入 {total_tasks} 个任务，{total_rubrics} 个rubric，{total_answers} 个标准答案",
+            message=f"成功导入 {total_tasks} 个任务，{total_rubrics} 个rubric，{total_answers} 个标准答案，{total_tree_nodes} 个tree结构",
             task_count=total_tasks,
             rubric_count=total_rubrics,
             answer_count=total_answers
@@ -1074,6 +1576,263 @@ def batch_import(data: BatchImportRequest, current_user: dict = Depends(require_
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
     finally:
         conn.close()
+
+
+# ==================== 导入历史与版本控制接口 ====================
+
+@app.get("/api/admin/task-sets/{task_set_id}/import-history")
+def get_import_history(task_set_id: int, current_user: dict = Depends(require_root)):
+    """获取任务集合的导入历史列表"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查任务集合是否存在
+    cursor.execute("SELECT id FROM task_sets WHERE id = ?", (task_set_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="任务集合不存在")
+
+    # 获取导入历史
+    cursor.execute("""
+        SELECT ih.*, u.phone as imported_by_name
+        FROM import_history ih
+        LEFT JOIN users u ON ih.imported_by = u.id
+        WHERE ih.task_set_id = ?
+        ORDER BY ih.created_at DESC
+    """, (task_set_id,))
+    history = cursor.fetchall()
+    conn.close()
+
+    return [{
+        "id": h["id"],
+        "task_set_id": h["task_set_id"],
+        "imported_by": h["imported_by"],
+        "imported_by_name": h["imported_by_name"],
+        "import_batch_id": h["import_batch_id"],
+        "import_type": h["import_type"],
+        "created_at": h["created_at"]
+    } for h in history]
+
+
+@app.get("/api/admin/import-history/{history_id}/original")
+def get_original_import_data(history_id: int, current_user: dict = Depends(require_root)):
+    """获取某次导入的原始数据"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM import_history WHERE id = ?", (history_id,))
+    history = cursor.fetchone()
+    conn.close()
+
+    if not history:
+        raise HTTPException(status_code=404, detail="导入历史不存在")
+
+    return {
+        "id": history["id"],
+        "task_set_id": history["task_set_id"],
+        "import_batch_id": history["import_batch_id"],
+        "original_data": json.loads(history["original_data"]),
+        "import_type": history["import_type"],
+        "created_at": history["created_at"]
+    }
+
+
+@app.get("/api/admin/task-sets/{task_set_id}/import-history/{history_id}/diff")
+def get_import_diff(task_set_id: int, history_id: int, current_user: dict = Depends(require_root)):
+    """
+    获取某次导入的原始数据与当前状态的对比（类似git diff）
+    显示哪些rubrics被添加、删除、修改
+    """
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 获取导入历史记录
+    cursor.execute("""
+        SELECT * FROM import_history
+        WHERE id = ? AND task_set_id = ?
+    """, (history_id, task_set_id))
+    history = cursor.fetchone()
+
+    if not history:
+        conn.close()
+        raise HTTPException(status_code=404, detail="导入历史不存在")
+
+    # 解析原始导入数据
+    original_data = json.loads(history["original_data"])
+    original_prompt = original_data.get("prompt", "")
+    original_rubrics = original_data.get("rubrics", [])
+    original_answers = original_data.get("answers", [])
+
+    # 获取当前任务状态
+    cursor.execute("""
+        SELECT t.* FROM tasks t
+        WHERE t.task_set_id = ? AND t.query = ?
+    """, (task_set_id, original_prompt))
+    current_task = cursor.fetchone()
+
+    # 构建对比结果
+    diff_result = {
+        "prompt": original_prompt,
+        "task_exists": current_task is not None,
+        "task_id": current_task["id"] if current_task else None,
+        "rubrics": [],
+        "answers": {
+            "original_count": len(original_answers),
+            "current_count": 0,
+            "added": [],
+            "removed": [],
+            "unchanged": []
+        }
+    }
+
+    if current_task:
+        task_id = current_task["id"]
+
+        # 获取当前rubrics
+        cursor.execute("SELECT * FROM rubrics WHERE task_id = ?", (task_id,))
+        current_rubrics = cursor.fetchall()
+
+        # 构建原始rubric字典（以criterion为key）
+        original_rubric_dict = {}
+        for r in original_rubrics:
+            criterion = r.get("criterion", "")
+            original_rubric_dict[criterion] = {
+                "point": r.get("point", 0),
+                "axis": r.get("axis", ""),
+                "selected": r.get("selected", False)
+            }
+
+        # 构建当前rubric字典（解析content JSON）
+        current_rubric_dict = {}
+        for r in current_rubrics:
+            try:
+                parsed = json.loads(r["content"])
+                criterion = parsed.get("title", "")
+                current_rubric_dict[criterion] = {
+                    "point": parsed.get("score", 0),
+                    "axis": parsed.get("dimension", ""),
+                    "selected": bool(r["selected"]),
+                    "rubric_id": r["id"]
+                }
+            except (json.JSONDecodeError, TypeError):
+                criterion = r["content"]
+                current_rubric_dict[criterion] = {
+                    "point": 0,
+                    "axis": "",
+                    "selected": bool(r["selected"]),
+                    "rubric_id": r["id"]
+                }
+
+        # 计算rubric差异
+        all_criteria = set(original_rubric_dict.keys()) | set(current_rubric_dict.keys())
+
+        for criterion in all_criteria:
+            original = original_rubric_dict.get(criterion)
+            current = current_rubric_dict.get(criterion)
+
+            if original and current:
+                # 检查是否有修改
+                point_changed = original["point"] != current["point"]
+                axis_changed = original["axis"] != current["axis"]
+                selected_changed = original["selected"] != current["selected"]
+
+                if point_changed or axis_changed or selected_changed:
+                    diff_result["rubrics"].append({
+                        "criterion": criterion,
+                        "change_type": "modified",
+                        "old": original,
+                        "new": current
+                    })
+                else:
+                    diff_result["rubrics"].append({
+                        "criterion": criterion,
+                        "change_type": "unchanged",
+                        "old": original,
+                        "new": current
+                    })
+            elif original and not current:
+                # 被删除的rubric
+                diff_result["rubrics"].append({
+                    "criterion": criterion,
+                    "change_type": "removed",
+                    "old": original,
+                    "new": None
+                })
+            elif current and not original:
+                # 新增的rubric
+                diff_result["rubrics"].append({
+                    "criterion": criterion,
+                    "change_type": "added",
+                    "old": None,
+                    "new": current
+                })
+
+        # 获取当前answers
+        cursor.execute("SELECT content FROM reference_answers WHERE task_id = ?", (task_id,))
+        current_answers = [row["content"] for row in cursor.fetchall()]
+
+        diff_result["answers"]["current_count"] = len(current_answers)
+
+        # 计算answer差异
+        original_answer_set = set(original_answers)
+        current_answer_set = set(current_answers)
+
+        diff_result["answers"]["unchanged"] = list(original_answer_set & current_answer_set)
+        diff_result["answers"]["removed"] = list(original_answer_set - current_answer_set)
+        diff_result["answers"]["added"] = list(current_answer_set - original_answer_set)
+
+    else:
+        # 任务已被删除，所有rubrics和answers都标记为removed
+        for r in original_rubrics:
+            diff_result["rubrics"].append({
+                "criterion": r.get("criterion", ""),
+                "change_type": "removed",
+                "old": {
+                    "point": r.get("point", 0),
+                    "axis": r.get("axis", ""),
+                    "selected": r.get("selected", False)
+                },
+                "new": None
+            })
+        diff_result["answers"]["removed"] = original_answers
+
+    conn.close()
+    return diff_result
+
+
+@app.get("/api/admin/task-sets/{task_set_id}/import-batches")
+def get_import_batches(task_set_id: int, current_user: dict = Depends(require_root)):
+    """获取任务集合的导入批次列表（按batch_id分组）"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT import_batch_id, MIN(created_at) as import_time,
+               COUNT(*) as task_count, imported_by
+        FROM import_history
+        WHERE task_set_id = ?
+        GROUP BY import_batch_id
+        ORDER BY import_time DESC
+    """, (task_set_id,))
+    batches = cursor.fetchall()
+
+    # 获取导入者名称
+    result = []
+    for batch in batches:
+        cursor.execute("SELECT phone FROM users WHERE id = ?", (batch["imported_by"],))
+        user_row = cursor.fetchone()
+        imported_by_name = user_row["phone"] if user_row else "未知"
+
+        result.append({
+            "batch_id": batch["import_batch_id"],
+            "import_time": batch["import_time"],
+            "task_count": batch["task_count"],
+            "imported_by": batch["imported_by"],
+            "imported_by_name": imported_by_name
+        })
+
+    conn.close()
+    return result
 
 
 if __name__ == "__main__":
