@@ -698,6 +698,69 @@ def delete_tree_node(
     return {"message": "删除成功", "node_id": node_id}
 
 
+# 重新排序子节点
+@app.post("/api/tree-nodes/{node_id}/reorder")
+def reorder_tree_nodes(
+    node_id: int,
+    data: dict,
+    current_user: int = Depends(get_current_user)
+):
+    """重新排序父节点的子节点"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 检查节点是否存在
+    cursor.execute("SELECT * FROM tree_nodes WHERE id = ?", (node_id,))
+    parent_node = cursor.fetchone()
+    if not parent_node:
+        conn.close()
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    from_index = data.get("from_index")
+    to_index = data.get("to_index")
+
+    if from_index is None or to_index is None:
+        conn.close()
+        raise HTTPException(status_code=400, detail="缺少 from_index 或 to_index")
+
+    # 获取该父节点的所有子节点，按 node_order 排序
+    cursor.execute(
+        "SELECT * FROM tree_nodes WHERE parent_id = ? ORDER BY node_order",
+        (node_id,)
+    )
+    children = cursor.fetchall()
+
+    if from_index < 0 or from_index >= len(children) or to_index < 0 or to_index > len(children):
+        conn.close()
+        raise HTTPException(status_code=400, detail="索引超出范围")
+
+    # 如果 to_index 等于长度，调整为最后一个位置
+    if to_index >= len(children):
+        to_index = len(children) - 1
+
+    # 如果索引相同，无需操作
+    if from_index == to_index:
+        conn.close()
+        return {"message": "位置未改变", "parent_id": node_id}
+
+    # 重新排序
+    children_list = list(children)
+    moved_node = children_list.pop(from_index)
+    children_list.insert(to_index, moved_node)
+
+    # 更新所有子节点的 node_order
+    for idx, child in enumerate(children_list):
+        cursor.execute(
+            "UPDATE tree_nodes SET node_order = ? WHERE id = ?",
+            (idx, child["id"])
+        )
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "排序成功", "parent_id": node_id}
+
+
 # 将 leaf 节点转为 branch 节点
 @app.patch("/api/tree-nodes/{node_id}/convert-to-branch")
 def convert_tree_node_to_branch(
@@ -1345,10 +1408,40 @@ def export_task_set(task_set_id: int, current_user: dict = Depends(require_root)
         for answer in answers:
             task_item["answers"].append(answer["content"])
 
+        # 获取任务的 tree 结构
+        tree_nodes = get_tree_nodes(cursor, task["id"])
+        if tree_nodes:
+            # 如果有 tree 数据，取第一个根节点
+            task_item["tree"] = {
+                "reason": tree_nodes[0].get("claim", ""),
+                "tree": build_export_tree(tree_nodes[0]) if tree_nodes else None
+            }
+
         export_data.append(task_item)
 
     conn.close()
     return export_data
+
+
+def build_export_tree(node: dict) -> dict:
+    """将数据库中的 tree 节点转换为导出格式"""
+    result = {
+        "claim": node["claim"],
+        "type": node["type"],
+        "selected": node.get("selected", False),
+        "professional": node.get("professional", False),
+        "required": node.get("required", False),
+    }
+
+    # 添加 rubrics（仅叶子节点有）
+    if node.get("rubrics"):
+        result["rubrics"] = node["rubrics"]
+
+    # 递归处理子节点
+    if node.get("nodes") and len(node["nodes"]) > 0:
+        result["nodes"] = [build_export_tree(child) for child in node["nodes"]]
+
+    return result
 
 
 def insert_tree_nodes(cursor, task_id: int, node, parent_id: int = None, order: int = 0):
@@ -1377,14 +1470,24 @@ def insert_tree_nodes(cursor, task_id: int, node, parent_id: int = None, order: 
 
 def get_tree_nodes(cursor, task_id: int, parent_id: int = None) -> List[dict]:
     """递归获取 tree 节点（全局共享状态）"""
-    cursor.execute(
-        """SELECT tn.*, COALESCE(tns.selected, 0) as selected, COALESCE(tns.professional, 0) as professional, COALESCE(tns.required, 0) as required
-           FROM tree_nodes tn
-           LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
-           WHERE tn.task_id = ? AND tn.parent_id IS ?
-           ORDER BY tn.node_order""",
-        (task_id, parent_id)
-    )
+    if parent_id is None:
+        cursor.execute(
+            """SELECT tn.*, COALESCE(tns.selected, 0) as selected, COALESCE(tns.professional, 0) as professional, COALESCE(tns.required, 0) as required
+               FROM tree_nodes tn
+               LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
+               WHERE tn.task_id = ? AND tn.parent_id IS NULL
+               ORDER BY tn.node_order""",
+            (task_id,)
+        )
+    else:
+        cursor.execute(
+            """SELECT tn.*, COALESCE(tns.selected, 0) as selected, COALESCE(tns.professional, 0) as professional, COALESCE(tns.required, 0) as required
+               FROM tree_nodes tn
+               LEFT JOIN tree_node_selections tns ON tn.id = tns.node_id
+               WHERE tn.task_id = ? AND tn.parent_id = ?
+               ORDER BY tn.node_order""",
+            (task_id, parent_id)
+        )
     nodes = cursor.fetchall()
 
     result = []

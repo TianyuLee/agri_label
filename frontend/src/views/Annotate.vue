@@ -220,12 +220,17 @@
                   v-if="currentTask.tree"
                   :node="currentTask.tree"
                   :level="0"
+                  :dragging-index="treeDraggingIndex"
+                  :drag-over-index="treeDragOverIndex"
                   @toggle="toggleTreeNode"
-                  @update="updateTreeNode"
+                  @update="handleTreeUpdate"
                   @delete="deleteTreeNode"
                   @add-child="addTreeNodeChild"
                   @update-professional="updateTreeNodeProfessional"
                   @update-required="updateTreeNodeRequired"
+                  @drag-start="handleTreeDragStart"
+                  @drag-over="handleTreeDragOver"
+                  @drag-end="handleTreeDragEnd"
                 />
               </div>
             </div>
@@ -743,6 +748,11 @@ const tasks = ref([])
 const currentTask = ref(null)
 const selectedSetId = ref(null)
 const selectedTaskId = ref(null)
+
+// Tree 拖拽排序状态
+const treeDraggingIndex = ref(null)
+const treeDragOverIndex = ref(null)
+const treeDragParentId = ref(null)
 
 // 任务集合栏折叠状态
 const isTaskSetCollapsed = ref(false)
@@ -1779,6 +1789,77 @@ const updateTreeNodeRequired = async ({ node, required }) => {
     console.error('更新必答标记失败:', err)
     alert('更新失败: ' + (err.response?.data?.detail || err.message))
   }
+}
+
+// 重新排序子节点
+const reorderTreeNode = async ({ parentId, fromIndex, toIndex }) => {
+  if (!parentId || fromIndex === undefined || toIndex === undefined || fromIndex === toIndex) return
+
+  try {
+    // 先更新本地状态
+    const updateNodeInTree = (n) => {
+      if (n.id === parentId && n.nodes) {
+        const children = [...n.nodes]
+        const [movedNode] = children.splice(fromIndex, 1)
+        children.splice(toIndex > fromIndex ? toIndex - 1 : toIndex, 0, movedNode)
+        return { ...n, nodes: children }
+      }
+      if (n.nodes) {
+        return { ...n, nodes: n.nodes.map(updateNodeInTree) }
+      }
+      return n
+    }
+
+    if (currentTask.value && currentTask.value.tree) {
+      currentTask.value.tree = updateNodeInTree(currentTask.value.tree)
+    }
+
+    // 调用后端 API 保存新顺序
+    await axios.post(`/api/tree-nodes/${parentId}/reorder`, {
+      from_index: fromIndex,
+      to_index: toIndex > fromIndex ? toIndex - 1 : toIndex
+    })
+  } catch (err) {
+    console.error('重新排序失败:', err)
+    alert('排序保存失败: ' + (err.response?.data?.detail || err.message))
+    // 刷新数据以恢复正确状态
+    await fetchCurrentTask()
+  }
+}
+
+// 处理 Tree 更新事件
+const handleTreeUpdate = async (data) => {
+  // 检查是否是重排序操作
+  if (data && data.reorder) {
+    const { parentId, fromIndex, toIndex } = data
+    await reorderTreeNode({ parentId, fromIndex, toIndex })
+    return
+  }
+
+  // 普通更新
+  await updateTreeNode(data)
+}
+
+// Tree 拖拽开始
+const handleTreeDragStart = ({ parentId, index }) => {
+  treeDragParentId.value = parentId
+  treeDraggingIndex.value = index
+  treeDragOverIndex.value = null
+}
+
+// Tree 拖拽经过
+const handleTreeDragOver = ({ parentId, index }) => {
+  // 只允许在同一父节点内拖拽
+  if (parentId === treeDragParentId.value && index !== treeDraggingIndex.value) {
+    treeDragOverIndex.value = index
+  }
+}
+
+// Tree 拖拽结束
+const handleTreeDragEnd = () => {
+  treeDraggingIndex.value = null
+  treeDragOverIndex.value = null
+  treeDragParentId.value = null
 }
 
 // 切换rubric选择状态
@@ -2968,6 +3049,7 @@ onMounted(() => {
 .rubric-item-v2.negative-score {
   border-color: #ff4d4f;
   background: #fff2f0;
+  color: #333;
 }
 
 .rubric-item-v2.negative-score:hover {

@@ -69,28 +69,49 @@
     </div>
     <div v-if="hasChildren" class="tree-children tree-children-root">
       <TreeNode
-        v-for="(child, index) in node.nodes"
-        :key="child.id || index"
+        v-for="(child, index) in reorderedChildren"
+        :key="child.id || child.__key"
         :node="child"
         :level="level + 1"
-        @toggle="$emit('toggle', $event)"
-        @update="$emit('update', $event)"
-        @delete="$emit('delete', $event)"
-        @add-child="$emit('add-child', $event)"
-        @update-professional="$emit('update-professional', $event)"
-        @update-required="$emit('update-required', $event)"
+        :parent-id="node.id"
+        :index="index"
+        :total-children="reorderedChildren.length"
+        :dragging-index="draggingIndex"
+        :drag-over-index="dragOverIndex"
+        @toggle="handleChildToggle"
+        @update="handleChildUpdate"
+        @delete="handleChildDelete"
+        @add-child="handleChildAdd"
+        @update-professional="handleChildProfessional"
+        @update-required="handleChildRequired"
+        @drag-start="handleChildDragStart"
+        @drag-over="handleChildDragOver"
+        @drag-end="handleChildDragEnd"
       />
     </div>
   </div>
 
   <!-- Branch 节点 -->
-  <div v-else-if="node.type === 'branch'" class="tree-node is-branch-node">
+  <div v-else-if="node.type === 'branch'" class="tree-node is-branch-node"
+    :class="{
+      'is-dragging-self': isDragging,
+      'is-drag-over': dragOverState && !isDragging
+    }"
+  >
     <div
       class="tree-node-header"
-      :class="getLevelClass(level)"
+      :class="[getLevelClass(level), { 'dragging': isDragging }]"
       :style="indentStyle"
+      draggable="true"
+      @dragstart="handleDragStart"
+      @dragenter.prevent="handleDragEnter"
+      @dragover.prevent="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+      @dragend="handleDragEnd"
       @click="toggleExpand"
     >
+      <span class="drag-handle" @mousedown.stop>⋮⋮</span>
       <label v-if="!isRoot" class="required-checkbox-label" :class="{ checked: node.required }" @click.stop>
         <input
           type="checkbox"
@@ -113,6 +134,8 @@
         </div>
       </div>
     </div>
+    <!-- 拖拽放置指示器 -->
+    <div v-if="dragOverState && !isDragging" class="drop-indicator" :class="dropPosition"></div>
     <!-- Branch 节点也可以有表格 -->
     <div v-if="node.rubrics && node.rubrics.length > 0" class="tree-branch-rubrics">
       <div class="tree-rubrics-wrapper">
@@ -140,24 +163,52 @@
     </div>
     <div v-if="isExpanded" class="tree-children-container">
       <TreeNode
-        v-for="(child, index) in node.nodes"
-        :key="child.id || index"
+        v-for="(child, idx) in reorderedChildren"
+        :key="child.id || child.__key"
         :node="child"
         :level="level + 1"
-        @toggle="$emit('toggle', $event)"
-        @update="$emit('update', $event)"
-        @delete="$emit('delete', $event)"
-        @add-child="$emit('add-child', $event)"
-        @update-professional="$emit('update-professional', $event)"
-        @update-required="$emit('update-required', $event)"
+        :parent-id="node.id"
+        :index="idx"
+        :total-children="reorderedChildren.length"
+        :dragging-index="draggingIndex"
+        :drag-over-index="dragOverIndex"
+        @toggle="handleChildToggle"
+        @update="handleChildUpdate"
+        @delete="handleChildDelete"
+        @add-child="handleChildAdd"
+        @update-professional="handleChildProfessional"
+        @update-required="handleChildRequired"
+        @drag-start="handleChildDragStart"
+        @drag-over="handleChildDragOver"
+        @drag-end="handleChildDragEnd"
       />
     </div>
   </div>
 
   <!-- Leaf 节点 -->
-  <div v-else-if="node.type === 'leaf'" class="tree-node is-leaf-node">
-    <div class="tree-leaf-wrapper" :class="{ 'professional-active': node.professional }" :style="indentStyle">
+  <div v-else-if="node.type === 'leaf'" class="tree-node is-leaf-node"
+    :class="{
+      'is-dragging-self': isDragging,
+      'is-drag-over': dragOverState && !isDragging
+    }"
+  >
+    <!-- 顶部放置指示器 -->
+    <div v-if="dragOverState === 'top' && !isDragging" class="drop-indicator top"></div>
+
+    <div
+      class="tree-leaf-wrapper"
+      :class="{ 'professional-active': node.professional, 'dragging': isDragging }"
+      :style="indentStyle"
+      draggable="true"
+      @dragstart="handleDragStart"
+      @dragenter.prevent="handleDragEnter"
+      @dragover.prevent="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+      @dragend="handleDragEnd"
+    >
       <div class="tree-leaf-header" @click="toggleLeafExpand">
+        <span class="drag-handle" @mousedown.stop>⋮⋮</span>
         <label v-if="!isRoot" class="required-checkbox-label" :class="{ checked: node.required }" @click.stop>
           <input
             type="checkbox"
@@ -210,6 +261,9 @@
         </table>
       </div>
     </div>
+
+    <!-- 底部放置指示器 -->
+    <div v-if="dragOverState === 'bottom' && !isDragging" class="drop-indicator bottom"></div>
   </div>
 
   <!-- 添加节点弹窗 -->
@@ -248,28 +302,81 @@ const props = defineProps({
   level: {
     type: Number,
     default: 0
+  },
+  parentId: {
+    type: [Number, String],
+    default: null
+  },
+  index: {
+    type: Number,
+    default: null
+  },
+  totalChildren: {
+    type: Number,
+    default: 0
+  },
+  draggingIndex: {
+    type: Number,
+    default: null
+  },
+  dragOverIndex: {
+    type: Number,
+    default: null
   }
 })
 
-const emit = defineEmits(['toggle', 'update', 'delete', 'add-child', 'update-professional', 'update-required'])
+const emit = defineEmits([
+  'toggle', 'update', 'delete', 'add-child',
+  'update-professional', 'update-required',
+  'drag-start', 'drag-over', 'drag-end'
+])
 
 const isExpanded = ref(props.level === 0)
-const isLeafExpanded = ref(false)  // 叶子节点表格展开状态，默认折叠
+const isLeafExpanded = ref(false)
 const isEditing = ref(false)
 const editClaim = ref('')
 const editRubrics = ref([])
+const isDragging = ref(false)
+const dragOverState = ref(null) // 'top' | 'bottom' | null
+const dropPosition = computed(() => dragOverState.value)
 
 // 添加节点弹窗相关
 const showAddModal = ref(false)
 const addModalTitle = ref('')
 const addModalPlaceholder = ref('')
 const newNodeClaim = ref('')
-const addNodeType = ref('') // 'branch' 或 'leaf'
+const addNodeType = ref('')
 
 const hasChildren = computed(() => props.node.nodes && props.node.nodes.length > 0)
-const hasRubrics = computed(() => props.node.rubrics && props.node.rubrics.length > 0)
 const isRoot = computed(() => props.level === 0)
 const isLeaf = computed(() => !hasChildren.value)
+const isLast = computed(() => props.index === props.totalChildren - 1)
+
+// 根据拖拽状态计算显示的子节点顺序
+const reorderedChildren = computed(() => {
+  if (!props.node.nodes) return []
+
+  const children = [...props.node.nodes]
+  const fromIdx = props.draggingIndex
+  const toIdx = props.dragOverIndex
+
+  // 如果有有效的拖拽索引，显示预览顺序
+  if (fromIdx !== null && toIdx !== null && fromIdx !== toIdx && fromIdx >= 0 && fromIdx < children.length) {
+    const [moved] = children.splice(fromIdx, 1)
+    // 调整插入位置
+    let insertIdx = toIdx
+    if (fromIdx < toIdx) {
+      insertIdx = toIdx - 1
+    }
+    insertIdx = Math.max(0, Math.min(insertIdx, children.length))
+    children.splice(insertIdx, 0, moved)
+
+    // 标记为预览状态
+    return children.map((c, i) => ({ ...c, __preview: true, __key: `preview-${c.id || i}` }))
+  }
+
+  return children.map((c, i) => ({ ...c, __key: c.id || i }))
+})
 
 const indentStyle = computed(() => ({
   marginLeft: props.level <= 1 ? '0' : `${(props.level - 1) * 24}px`
@@ -281,10 +388,6 @@ const toggleExpand = () => {
 
 const toggleLeafExpand = () => {
   isLeafExpanded.value = !isLeafExpanded.value
-}
-
-const handleToggle = () => {
-  emit('toggle', props.node)
 }
 
 const startEdit = () => {
@@ -313,25 +416,20 @@ const handleDelete = () => {
   }
 }
 
-// 切换专业性标记
 const toggleProfessional = () => {
-  const newProfessional = !props.node.professional
   emit('update-professional', {
     node: props.node,
-    professional: newProfessional
+    professional: !props.node.professional
   })
 }
 
-// 切换必答标记
 const toggleRequired = () => {
-  const newRequired = !props.node.required
   emit('update-required', {
     node: props.node,
-    required: newRequired
+    required: !props.node.required
   })
 }
 
-// 添加分支子节点
 const addBranchChild = () => {
   addModalTitle.value = '添加分支子节点'
   addModalPlaceholder.value = '请输入分支子节点的内容...'
@@ -340,7 +438,6 @@ const addBranchChild = () => {
   showAddModal.value = true
 }
 
-// 添加叶子子节点
 const addLeafChild = () => {
   addModalTitle.value = '添加叶子子节点'
   addModalPlaceholder.value = '请输入叶子子节点的内容...'
@@ -349,32 +446,25 @@ const addLeafChild = () => {
   showAddModal.value = true
 }
 
-// 确认添加节点
 const confirmAddNode = () => {
   if (newNodeClaim.value && newNodeClaim.value.trim()) {
-    const childData = {
-      claim: newNodeClaim.value.trim(),
-      type: addNodeType.value,
-      rubrics: addNodeType.value === 'leaf' ? [{ criterion: '', score: 0 }] : [],
-      nodes: []
-    }
     emit('add-child', {
       parentNode: props.node,
-      childData
+      childData: {
+        claim: newNodeClaim.value.trim(),
+        type: addNodeType.value,
+        rubrics: addNodeType.value === 'leaf' ? [{ criterion: '', score: 0 }] : [],
+        nodes: []
+      }
     })
   }
   closeAddModal()
 }
 
-// 取消添加节点
 const closeAddModal = () => {
   showAddModal.value = false
   newNodeClaim.value = ''
   addNodeType.value = ''
-}
-
-const updateRubric = (idx, field, value) => {
-  editRubrics.value[idx][field] = value
 }
 
 const addRubric = () => {
@@ -385,8 +475,146 @@ const removeRubric = (idx) => {
   editRubrics.value.splice(idx, 1)
 }
 
-const getLevelClass = (lvl) => {
-  return `tree-level-${Math.min(lvl, 4)}`
+const getLevelClass = (lvl) => `tree-level-${Math.min(lvl, 4)}`
+
+// 子节点事件处理
+const handleChildToggle = (node) => emit('toggle', node)
+const handleChildUpdate = (node) => emit('update', node)
+const handleChildDelete = (node) => emit('delete', node)
+const handleChildAdd = (data) => emit('add-child', data)
+const handleChildProfessional = (data) => emit('update-professional', data)
+const handleChildRequired = (data) => emit('update-required', data)
+
+// 子节点拖拽事件处理
+const handleChildDragStart = ({ parentId, index }) => {
+  emit('drag-start', { parentId, index })
+}
+
+const handleChildDragOver = ({ parentId, index }) => {
+  emit('drag-over', { parentId, index })
+}
+
+const handleChildDragEnd = () => {
+  dragOverState.value = null
+  emit('drag-end')
+}
+
+// 当前节点拖拽事件
+const handleDragStart = (e) => {
+  if (props.isRoot) {
+    e.preventDefault()
+    return
+  }
+  isDragging.value = true
+  e.dataTransfer.effectAllowed = 'move'
+  // 设置拖拽时的鼠标样式
+  e.dataTransfer.setDragImage(e.currentTarget, 0, 0)
+  e.dataTransfer.setData('application/json', JSON.stringify({
+    nodeId: props.node.id,
+    parentId: props.parentId,
+    fromIndex: props.index
+  }))
+
+  // 通知父组件开始拖拽
+  emit('drag-start', { parentId: props.parentId, index: props.index })
+}
+
+const handleDragEnter = (e) => {
+  if (props.isRoot) return
+  e.preventDefault()
+}
+
+const handleDragOver = (e) => {
+  if (props.isRoot) return
+  e.preventDefault()
+  e.stopPropagation()
+  e.dataTransfer.dropEffect = 'move'
+
+  // 计算鼠标位置相对于目标元素的位置
+  const rect = e.currentTarget.getBoundingClientRect()
+  const relativeY = e.clientY - rect.top
+  const threshold = rect.height / 2
+
+  // 根据鼠标位置决定是放在上方还是下方
+  const newState = relativeY < threshold ? 'top' : 'bottom'
+
+  if (dragOverState.value !== newState) {
+    dragOverState.value = newState
+  }
+
+  // 计算目标索引
+  let toIndex = props.index
+  if (newState === 'bottom') {
+    toIndex = props.index + 1
+  }
+
+  // 通知父组件拖拽经过
+  emit('drag-over', { parentId: props.parentId, index: toIndex })
+}
+
+const handleDragLeave = (e) => {
+  if (props.isRoot) return
+  // 检查是否真的离开了元素
+  const rect = e.currentTarget.getBoundingClientRect()
+  if (e.clientX < rect.left || e.clientX > rect.right ||
+      e.clientY < rect.top || e.clientY > rect.bottom) {
+    dragOverState.value = null
+  }
+}
+
+const handleDrop = (e) => {
+  if (props.isRoot) return
+  e.preventDefault()
+  e.stopPropagation()
+
+  isDragging.value = false
+  const position = dragOverState.value
+  dragOverState.value = null
+
+  let data
+  try {
+    data = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
+  } catch {
+    emit('drag-end')
+    return
+  }
+
+  const { parentId, fromIndex } = data
+
+  // 检查是否是同一父节点
+  if (parentId !== props.parentId || fromIndex === undefined) {
+    emit('drag-end')
+    return
+  }
+
+  // 计算目标索引
+  let toIndex = props.index
+  if (position === 'bottom') {
+    toIndex = props.index + 1
+  }
+
+  // 不能拖放到相同位置
+  if (fromIndex === toIndex || fromIndex === toIndex - 1) {
+    emit('drag-end')
+    return
+  }
+
+  // 触发重排序
+  emit('drag-end')
+
+  // 向上传递重排序事件
+  emit('update', {
+    reorder: true,
+    parentId: props.parentId,
+    fromIndex,
+    toIndex
+  })
+}
+
+const handleDragEnd = () => {
+  isDragging.value = false
+  dragOverState.value = null
+  emit('drag-end')
 }
 </script>
 
@@ -448,26 +676,6 @@ const getLevelClass = (lvl) => {
   transform: rotate(90deg);
 }
 
-.tree-checkbox {
-  width: 18px;
-  height: 18px;
-  border: 2px solid #d9d9d9;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  background: white;
-  font-size: 12px;
-}
-
-.tree-checkbox.checked {
-  background: #1890ff;
-  border-color: #1890ff;
-  color: white;
-}
-
 .tree-claim {
   flex: 1;
   font-weight: 500;
@@ -516,7 +724,6 @@ const getLevelClass = (lvl) => {
   border-left: 2px solid #e8e8e8;
 }
 
-/* 根节点下的一级子节点不缩进，与总结并列 */
 .tree-children-root {
   margin-left: 0;
   padding-left: 0;
@@ -537,7 +744,7 @@ const getLevelClass = (lvl) => {
   padding: 12px;
   margin: 8px 0;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
-  transition: border-color 0.2s;
+  transition: all 0.2s;
 }
 
 .tree-leaf-wrapper.professional-active {
@@ -549,7 +756,6 @@ const getLevelClass = (lvl) => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 8px;
   cursor: pointer;
 }
 
@@ -611,11 +817,12 @@ const getLevelClass = (lvl) => {
 }
 
 .tree-rubrics-table tr.negative-score td {
-  background: #ffcccc !important;
+  background: #ffe6e6 !important;
+  color: #333 !important;
 }
 
 .tree-rubrics-table tr.negative-score .rubric-score {
-  color: #cc0000 !important;
+  color: #1890ff !important;
 }
 
 /* Edit mode */
@@ -682,9 +889,9 @@ const getLevelClass = (lvl) => {
 }
 
 .tree-edit-score.negative-score {
-  background: #ffcccc;
-  border-color: #ff4d4f;
-  color: #cc0000;
+  background: #ffe6e6;
+  border-color: #ff9999;
+  color: #333;
 }
 
 .tree-edit-actions {
@@ -745,7 +952,6 @@ const getLevelClass = (lvl) => {
   color: white;
 }
 
-/* 垂直排列的按钮组 */
 .tree-actions-vertical {
   display: flex;
   flex-direction: column;
@@ -810,7 +1016,6 @@ const getLevelClass = (lvl) => {
   background-color: #efdbff;
 }
 
-/* Branch 节点的表格样式 */
 .tree-branch-rubrics {
   margin: 12px 0 12px 24px;
   padding: 12px;
@@ -823,7 +1028,6 @@ const getLevelClass = (lvl) => {
   margin-top: 0;
 }
 
-/* 专业性标签样式 */
 .tree-professional-tag {
   display: flex;
   justify-content: flex-end;
@@ -867,7 +1071,6 @@ const getLevelClass = (lvl) => {
   font-weight: 500;
 }
 
-/* 必答复选框样式 */
 .required-checkbox-label {
   display: flex;
   align-items: center;
@@ -913,7 +1116,6 @@ const getLevelClass = (lvl) => {
   opacity: 1;
 }
 
-/* 添加节点弹窗样式 */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -1046,5 +1248,73 @@ const getLevelClass = (lvl) => {
 
 .modal-btn-confirm:hover {
   background: #40a9ff;
+}
+
+/* 拖拽相关样式 */
+.drag-handle {
+  cursor: grab;
+  color: #999;
+  font-size: 14px;
+  padding: 0 4px;
+  user-select: none;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+  color: #666;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 正在拖拽的节点 */
+.tree-node-header.dragging,
+.tree-leaf-wrapper.dragging {
+  opacity: 0.5 !important;
+  transform: scale(0.98);
+}
+
+/* 拖拽中的节点（子元素） */
+.is-dragging-self {
+  opacity: 0.4;
+}
+
+/* 拖拽放置指示器 */
+.drop-indicator {
+  height: 3px;
+  background: #1890ff;
+  border-radius: 2px;
+  margin: 2px 0;
+  position: relative;
+  animation: pulse 0.5s ease-in-out infinite alternate;
+}
+
+.drop-indicator::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: -4px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid #1890ff;
+}
+
+@keyframes pulse {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+.is-branch-node,
+.is-leaf-node {
+  position: relative;
+}
+
+.is-leaf-node .tree-leaf-wrapper {
+  position: relative;
 }
 </style>
